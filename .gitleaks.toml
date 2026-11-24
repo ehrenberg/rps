@@ -1,0 +1,18 @@
+# gitleaks-Konfiguration: Standardregeln + projektspezifische Ergänzungen
+title = "rps gitleaks config"
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "ftp-credentials"
+description = "FTP-/SFTP-Zugangsdaten (Netcup-Upload)"
+regex = '''(?i)(ftp|sftp)[_-]?(pass(word)?|pwd|user(name)?)\s*[:=]\s*['"]?[^\s'"]{4,}'''
+keywords = ["ftp", "sftp"]
+
+[allowlist]
+description = "Bekannte Nicht-Secrets"
+paths = [
+  '''public/assets/fonts/.*''',
+  '''package-lock\.json''',
+]

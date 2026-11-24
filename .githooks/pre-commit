@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# Pre-Commit: Secrets-Scan mit gitleaks (Pflicht) + PHP-Syntaxcheck + schnelle JS-Tests.
+set -euo pipefail
+cd "$(git rev-parse --show-toplevel)"
+
+if ! command -v gitleaks >/dev/null 2>&1; then
+  echo "✘ gitleaks nicht gefunden – Commit abgebrochen (siehe docs/ENTWICKLUNG.md)." >&2
+  exit 1
+fi
+gitleaks git --pre-commit --staged --redact --no-banner --config .gitleaks.toml
+
+mapfile -t php_files < <(git diff --cached --name-only --diff-filter=ACM -- '*.php')
+for f in "${php_files[@]}"; do php -l "$f" >/dev/null; done
+
+if git diff --cached --name-only --diff-filter=ACM | grep -qE '\.(js|mjs)$'; then
+  node --test tests/js/ >/dev/null
+fi
+echo "✔ pre-commit: gitleaks, php -l, JS-Tests ok"
