@@ -4,9 +4,12 @@
   "description": "Nur Dev-Werkzeuge (Tests). Nichts davon landet in public/.",
   "type": "module",
   "scripts": {
-    "test": "node --test tests/js/ && php tests/run.php",
-    "serve": "php -S localhost:8000 -t public",
+    "test": "node --test tests/js/ && npm run test:php",
     "setup": "git config core.hooksPath .githooks",
-    "secrets": "gitleaks git --redact --no-banner --config .gitleaks.toml . && gitleaks dir --redact --no-banner --config .gitleaks.toml public tests docs"
+    "secrets": "docker compose --profile tools run --rm -T gitleaks git --redact --no-banner --config .gitleaks.toml . && docker compose --profile tools run --rm -T gitleaks dir --redact --no-banner --config .gitleaks.toml public tests docs",
+    "up": "docker compose up -d --build web",
+    "down": "docker compose down",
+    "test:php": "docker compose --profile tools run --rm -T php php tests/run.php",
+    "lint:php": "docker compose --profile tools run --rm -T php sh -c 'for f in $(find public tests -name \"*.php\"); do php -l \"$f\" >/dev/null || exit 1; done && echo PHP-Lint ok'"
   }
 }

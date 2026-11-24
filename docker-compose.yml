@@ -1,0 +1,24 @@
+# Lokale Entwicklungsumgebung. Start: docker compose up -d web  → http://localhost:8088
+services:
+  web:
+    build: { context: ., dockerfile: docker/web.Dockerfile }
+    ports: ["${RPS_PORT:-8088}:80"]
+    volumes:
+      - ./public:/var/www/html
+    environment:
+      RPS_DATA_DIR: /var/www/data   # außerhalb des Webroots, wie für Netcup empfohlen
+    tmpfs: ["/var/www/data:uid=33,gid=33"]
+
+  php:            # CLI auf Mindestversion 8.1: Tests, Lint
+    image: php:8.1-cli
+    working_dir: /app
+    volumes: [".:/app"]
+    user: "${UID:-1000}:${GID:-1000}"
+    profiles: [tools]
+
+  gitleaks:
+    image: zricethezav/gitleaks:latest
+    working_dir: /app
+    volumes: [".:/app"]
+    user: "${UID:-1000}:${GID:-1000}"
+    profiles: [tools]

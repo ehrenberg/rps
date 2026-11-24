@@ -30,3 +30,11 @@ Zug in Polling-Antworten oder DevTools auftaucht, bevor der Gegner gewählt hat.
 
 ### 2026-11-24 – Turnier als K.-o.-System
 **Begründung:** Spannender als Jeder-gegen-jeden, kurze Dauer, gut als Baum darstellbar.
+
+### 2026-11-24 – Docker für Entwicklung und Tests, gitleaks von Anfang an
+**Entscheidung:** Lokale Umgebung per `docker compose` (Apache 2.4 + PHP 8.1 mit aktiver
+`.htaccess`, CLI-Container für Tests, gitleaks-Container). Pre-Commit-Hook scannt jeden Commit
+mit gitleaks, lintet PHP auf 8.1 und führt die JS-Tests aus.
+**Begründung:** Wunsch von Basti. Reproduzierbar auf jedem Rechner, testet gegen die
+Produktions-Mindestversion statt gegen die zufällig installierte PHP-Version und prüft CSP,
+Header und Zugriffssperren schon lokal. Produktion bleibt unverändert: `public/` per FTP.

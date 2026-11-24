@@ -37,8 +37,9 @@ keine Drittanbieter, Server-Logs wie beim restlichen Hosting.
 ## Lokale Entwicklung
 
 ```bash
-php -S localhost:8000 -t public
+npm run up    # docker compose: Apache 2.4 + PHP 8.1, .htaccess aktiv → http://localhost:8088
 ```
 
-Der eingebaute PHP-Server wertet `.htaccess` nicht aus. Sicherheitsheader und Sperren daher
-zusätzlich auf dem echten Hosting prüfen.
+Der Container bildet das Hosting nach (Apache, `AllowOverride All`, PHP 8.1, `display_errors=Off`),
+die SQLite-Datei liegt dort außerhalb des Webroots (`RPS_DATA_DIR=/var/www/data`, tmpfs –
+nach `npm run down` ist sie weg). Header und Sperren trotzdem einmal auf dem echten Hosting prüfen.

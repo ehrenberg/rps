@@ -4,11 +4,19 @@
 
 ```bash
 npm run setup        # aktiviert die versionierten Git-Hooks in .githooks/
+npm run up           # baut und startet den Webserver-Container
 ```
 
-Benötigt lokal: `php` (8.1+, mit pdo_sqlite und mbstring), `node` (nur für Tests),
-`gitleaks` (Secrets-Scan). Auf Bastis Rechner sind `php` und `gitleaks` Wrapper-Skripte in
-`~/.local/bin`, die die Docker-Images `composer:2` bzw. `zricethezav/gitleaks` nutzen.
+Benötigt lokal nur **Docker** (mit Compose) und **Node ≥ 20** (für JS-Tests/Playwright).
+PHP und gitleaks laufen ausschließlich in Containern (`docker-compose.yml`):
+
+| Service | Image | Zweck |
+|---|---|---|
+| `web` | `docker/web.Dockerfile` (php:8.1-apache) | App wie auf Netcup, `.htaccess` aktiv, Port `${RPS_PORT:-8088}` |
+| `php` | php:8.1-cli | Tests und Lint auf der Produktions-Mindestversion (Profil `tools`) |
+| `gitleaks` | zricethezav/gitleaks | Secrets-Scan (Profil `tools`) |
+
+Port belegt? `RPS_PORT=8090 npm run up`.
 
 ## Qualitätssicherung
 

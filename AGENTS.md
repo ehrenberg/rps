@@ -38,11 +38,15 @@ Shared Hosting. Details: [docs/KONZEPT.md](docs/KONZEPT.md), [docs/ARCHITEKTUR.m
 
 ## Lokal starten & prüfen
 
+Alles läuft über Docker (Details: [docs/ENTWICKLUNG.md](docs/ENTWICKLUNG.md)):
+
 ```bash
-php -S localhost:8000 -t public          # App unter http://localhost:8000
-php -l public/api.php                    # Syntax-Check PHP
-php tests/run.php                        # PHP-Tests (sobald vorhanden)
-node --test tests/js/                    # JS-Tests für rules.js / ai.js (Node nur als Dev-Werkzeug)
+npm run setup        # einmalig: Git-Hooks aktivieren (gitleaks, php -l, JS-Tests)
+npm run up           # Apache 2.4 + PHP 8.1 mit .htaccess → http://localhost:8088
+npm test             # JS-Unit-Tests (Node) + PHP-Tests (Container php:8.1-cli)
+npm run lint:php     # Syntax-Check aller PHP-Dateien auf 8.1
+npm run secrets      # gitleaks über Historie und Arbeitskopie
+npm run down         # Umgebung stoppen
 ```
 
 Multiplayer testen: zwei Browserfenster (eins privat) oder Playwright mit zwei Kontexten.

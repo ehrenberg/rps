@@ -23,9 +23,12 @@ Registrierung, keine Cookies, keine externen Ressourcen.
 ## Lokal starten
 
 ```bash
-php -S localhost:8000 -t public
-# → http://localhost:8000
+npm run setup   # einmalig: Git-Hooks (gitleaks)
+npm run up      # Docker: Apache + PHP 8.1 → http://localhost:8088
+npm test        # alle Tests
 ```
+
+Voraussetzungen: Docker (mit Compose) und Node ≥ 20 (nur für Tests). Details: [docs/ENTWICKLUNG.md](docs/ENTWICKLUNG.md).
 
 Für Multiplayer-Tests zwei Browserfenster (eines privat) öffnen.
 
