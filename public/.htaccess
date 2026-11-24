@@ -5,8 +5,13 @@ AddDefaultCharset utf-8
 # Keine Server-Version in Apache-Fehlerseiten
 ServerSignature Off
 
-# Hash-Routing (#/…): der Server sieht nie App-Routen, daher kein ErrorDocument/Fallback auf
-# index.html – ein 404 betrifft nur wirklich fehlende Dateien und soll ehrlich 404 bleiben.
+# Hash-Routing (#/…): der Server sieht nie App-Routen, daher kein Fallback auf index.html –
+# ein 404 betrifft nur wirklich fehlende Dateien und soll ehrlich 404 bleiben.
+# Eigene, schlichte Fehlertexte statt der Hosting-Fehlerseiten (Plesk: /error_docs/ liegt außerhalb
+# dieses Ordners, dort würden die Sicherheitsheader unten fehlen). Text-Antworten bleiben im Kontext
+# dieser .htaccess, „Header always set“ greift damit auch auf 403/404.
+ErrorDocument 403 "403 – Zugriff verweigert."
+ErrorDocument 404 "404 – Nicht gefunden."
 
 # Dateien, die nie ausgeliefert werden dürfen (Doku, Skripte, DB, Backups, Editor-Reste),
 # falls so etwas versehentlich mit hochgeladen wird.
