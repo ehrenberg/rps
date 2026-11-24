@@ -568,13 +568,36 @@ export function floatEmoji(emoji, { x, y } = {}) {
   anim.finished.then(remove, remove);
 }
 
-/** Reduziert: keine Partikel, kein Shake; Emojis nur ein-/ausblenden. Synchronisiert data-reduced-fx. */
+/** Alle Partikel + Emitter weg, rAF-Schleife stoppen, Canvas leeren. */
+function clearParticles() {
+  if (state.raf) globalThis.cancelAnimationFrame?.(state.raf);
+  state.raf = 0;
+  state.system.clear();
+  if (state.ctx) {
+    state.ctx.setTransform(1, 0, 0, 1, 0, 0);
+    state.ctx.clearRect(0, 0, state.canvas.width, state.canvas.height);
+  }
+}
+
+/**
+ * Sofort alles beenden: Partikel, Regenwolke, schwebende Emojis; rAF-Schleife stoppt.
+ * Für Screenwechsel gedacht. Neue Effekte funktionieren danach ganz normal.
+ */
+export function clear() {
+  clearParticles();
+  emojiLayer?.replaceChildren();
+}
+
+/**
+ * Reduziert: keine Partikel, kein Shake; Emojis nur ein-/ausblenden.
+ * Synchronisiert data-reduced-fx: an → "1", aus → Attribut entfernt.
+ */
 export function setReducedFx(on) {
   state.reducedFlag = Boolean(on);
   const root = globalThis.document?.documentElement;
-  if (root) root.dataset.reducedFx = state.reducedFlag ? '1' : '0';
-  if (state.reducedFlag) {
-    state.system.clear();
-    state.ctx?.clearRect(0, 0, state.canvas.width, state.canvas.height);
+  if (root?.dataset) {
+    if (state.reducedFlag) root.dataset.reducedFx = '1';
+    else delete root.dataset.reducedFx;
   }
+  if (state.reducedFlag) clearParticles();
 }

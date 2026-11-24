@@ -5,7 +5,7 @@ import {
   ParticlePool, PARTICLE_TYPES, PHYSICS, FX_LIMITS, CONFETTI, SPARKS, BURST, RAIN,
   integrate, fadeAlpha, confettiSpawn, sparksSpawn, burstSpawn, createRainEmitter,
   createParticleSystem, shakeKeyframes, emojiKeyframes,
-  initFx, confetti, sparks, rain, burst, screenShake, floatEmoji, setReducedFx,
+  initFx, confetti, sparks, rain, burst, screenShake, floatEmoji, setReducedFx, clear,
 } from '../../public/assets/js/fx.js';
 
 const VIEW = { w: 400, h: 800 };
@@ -193,4 +193,111 @@ test('API wirft ohne Canvas/DOM nie', () => {
   floatEmoji('🔥');
   setReducedFx(true);
   setReducedFx(false);
+});
+
+/* ---------- API mit Fake-Browser (Canvas, rAF, DOM) ---------- */
+
+function installFakeBrowser() {
+  const saved = {};
+  for (const k of ['document', 'requestAnimationFrame', 'cancelAnimationFrame', 'innerWidth', 'innerHeight']) saved[k] = globalThis[k];
+  const raf = new Map();
+  let nextId = 1;
+  const cancelled = [];
+  const fakeNode = (tag) => {
+    const node = {
+      tag, children: [], style: {}, parent: null, isConnected: true, className: '',
+      setAttribute() {},
+      append(...cs) { for (const c of cs) { c.parent = node; node.children.push(c); } },
+      remove() { if (node.parent) node.parent.children = node.parent.children.filter((c) => c !== node); },
+      replaceChildren() { node.children = []; },
+      get childElementCount() { return node.children.length; },
+      get firstElementChild() { return node.children[0]; },
+      animate: () => ({ finished: new Promise(() => {}) }),
+    };
+    return node;
+  };
+  const body = fakeNode('body');
+  Object.assign(globalThis, {
+    innerWidth: 400,
+    innerHeight: 800,
+    requestAnimationFrame: (cb) => { const id = nextId++; raf.set(id, cb); return id; },
+    cancelAnimationFrame: (id) => { cancelled.push(id); raf.delete(id); },
+    document: { body, documentElement: { dataset: {} }, createElement: fakeNode },
+  });
+  let now = performance.now();
+  /** Führt anstehende Frames aus, bis keiner mehr geplant ist (max. n). Liefert die Anzahl. */
+  const runFrames = (max = 1000) => {
+    let n = 0;
+    while (raf.size && n < max) {
+      const [id, cb] = raf.entries().next().value;
+      raf.delete(id);
+      now += 1000 / 60;
+      cb(now);
+      n++;
+    }
+    return n;
+  };
+  const ctx = fakeCtx();
+  const canvas = { width: 0, height: 0, getContext: () => ctx, classList: { add() {} }, setAttribute() {} };
+  const restore = () => {
+    clear();
+    setReducedFx(false);
+    for (const [k, v] of Object.entries(saved)) if (v === undefined) delete globalThis[k]; else globalThis[k] = v;
+  };
+  return { raf, cancelled, runFrames, ctx, canvas, body, restore };
+}
+
+test('clear(): stoppt rAF sofort, entfernt Partikel, Regenwolke und Emojis', () => {
+  const b = installFakeBrowser();
+  try {
+    initFx(b.canvas);
+    rain({ duration: 5000 });
+    confetti();
+    floatEmoji('🔥');
+    floatEmoji('👍');
+    const layer = b.body.children[0];
+    assert.equal(layer.childElementCount, 2);
+    assert.equal(b.raf.size, 1, 'Schleife läuft');
+    const scheduled = [...b.raf.keys()][0];
+    b.runFrames(10);
+
+    const clearsBefore = b.ctx.calls.clearRect ?? 0;
+    clear();
+    assert.equal(b.raf.size, 0, 'kein Frame mehr geplant');
+    assert.ok(b.cancelled.length >= 1 && b.cancelled.at(-1) > scheduled - 1);
+    assert.equal(layer.childElementCount, 0, 'Emojis weg');
+    assert.ok(b.ctx.calls.clearRect > clearsBefore, 'Canvas geleert');
+    assert.equal(b.runFrames(), 0);
+
+    // Danach funktionieren Effekte normal; ohne Regen endet die Schleife schnell (Burst ≈ 0,5 s).
+    burst(10, 10);
+    assert.equal(b.raf.size, 1, 'Schleife startet neu');
+    const frames = b.runFrames();
+    assert.ok(frames > 0 && frames < 60, `Regen-Emitter wäre noch aktiv (${frames} Frames)`);
+    clear();
+    clear(); // mehrfach aufrufbar
+  } finally { b.restore(); }
+});
+
+test('clear() ohne initFx/DOM wirft nicht', () => {
+  clear();
+});
+
+test('setReducedFx: an → data-reduced-fx="1", aus → Attribut entfernt; an stoppt Partikel', () => {
+  const b = installFakeBrowser();
+  try {
+    const ds = globalThis.document.documentElement.dataset;
+    initFx(b.canvas);
+    confetti();
+    assert.equal(b.raf.size, 1);
+    setReducedFx(true);
+    assert.equal(ds.reducedFx, '1');
+    assert.equal(b.raf.size, 0, 'Schleife gestoppt');
+    confetti();
+    assert.equal(b.raf.size, 0, 'reduziert: keine neuen Partikel');
+    setReducedFx(false);
+    assert.equal('reducedFx' in ds, false);
+    confetti();
+    assert.equal(b.raf.size, 1);
+  } finally { b.restore(); }
 });
