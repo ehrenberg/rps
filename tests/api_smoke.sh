@@ -101,4 +101,29 @@ post "{\"action\":\"leave\",\"code\":\"$ROOM\",\"token\":\"$TB\"}"; expect_statu
 post "{\"action\":\"state\",\"code\":\"$ROOM\",\"token\":\"$TA\"}"
 grep -q '"end":"leave"' <<<"$BODY" || fail "leave nicht gewertet"; ok "Gegner gewinnt nach leave"
 
+# --- watch („Meine Spiele“) ---
+post '{"action":"create","type":"tournament","name":"Tina"}'; expect_status 200 "create Turnier"
+TROOM=$(field code); TT=$(field token)
+post "{\"action\":\"watch\",\"rooms\":[{\"code\":\"$ROOM\",\"token\":\"$TA\"},{\"code\":\"$ROOM\",\"token\":\"$TB\"},{\"code\":\"$TROOM\",\"token\":\"$TT\"}]}"
+expect_status 200 "watch"
+# Duplikat: der letzte Eintrag (B, gegangen) zählt.
+grep -q "\"$ROOM\":{\"gone\":true,\"reason\":\"left\"}" <<<"$BODY" || fail "watch: B sollte left sein: $BODY"
+grep -q "\"$TROOM\":{\"version\":1,\"type\":\"tournament\"" <<<"$BODY" || fail "watch: Turnier fehlt: $BODY"
+grep -q '"isHost":true' <<<"$BODY" && grep -q '"now":[0-9]' <<<"$BODY" || fail "watch: Felder fehlen: $BODY"
+if grep -q -e "$TT" -e "$TA" -e tokenHash -e history <<<"$BODY"; then fail "watch verrät Geheimnisse"; fi
+ok "watch: Kurzfassung, Duplikat, keine Geheimnisse"
+post "{\"action\":\"watch\",\"rooms\":[{\"code\":\"$ROOM\",\"token\":\"$TA\"},{\"code\":\"zzzzzz\",\"token\":\"$TA\"},{\"code\":\"!!\",\"token\":\"x\"}]}"
+expect_status 200 "watch gemischt"
+grep -q '"opponent":"Ben"' <<<"$BODY" && grep -q '"status":"finished"' <<<"$BODY" || fail "watch: Duell A falsch: $BODY"
+grep -q '"zzzzzz":{"gone":true,"reason":"notFound"}' <<<"$BODY" || fail "watch: notFound fehlt: $BODY"
+grep -q '"!!":{"gone":true,"reason":"forbidden"}' <<<"$BODY" || fail "watch: forbidden fehlt: $BODY"
+ok "watch: notFound/forbidden je Eintrag"
+V=$(sed -n 's/.*"'"$ROOM"'":{"version":\([0-9]*\).*/\1/p' <<<"$BODY")
+entries=""
+for i in 1 2 3 4 5 6 7 8 9 10; do entries+="{\"code\":\"$ROOM\",\"token\":\"$TA\",\"since\":$V},"; done
+post "{\"action\":\"watch\",\"rooms\":[${entries%,}]}"; expect_status 200 "watch mit 10 Einträgen (Body-Limit reicht)"
+grep -q "\"$ROOM\":{\"version\":$V,\"unchanged\":true}" <<<"$BODY" || fail "watch since → unchanged erwartet: $BODY"
+ok "watch since → unchanged"
+post "{\"action\":\"watch\",\"rooms\":[${entries}{\"code\":\"$ROOM\",\"token\":\"$TA\"}]}"; expect_status 400 "watch mit 11 Einträgen → 400"
+
 echo; echo "$PASS Prüfungen bestanden"
