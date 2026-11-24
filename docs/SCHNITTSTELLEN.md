@@ -97,7 +97,67 @@ createPoller({ code, token, onState, onError, onOnline }) → { start(), stop(),
 
 ### `storage` (Schlüssel)
 `rps.name`, `rps.sound`, `rps.reducedFx`, `rps.stats.v1`, `rps.ai.history.v1`,
-`rps.token.<code>` + `rps.me.<code>` (sessionStorage).
+`rps.rooms.v1` (offene Räume, s. `rooms.js`), `rps.notify`, `rps.notifyHint`.
+Früher: `rps.token.<code>` + `rps.me.<code>` (sessionStorage) – wird beim Start übernommen und gelöscht.
+
+### `rooms.js` (DOM-frei) – „Meine Spiele“
+```js
+createRoomStore({ storage? = localStorage, now?, events? = window }) → {
+  list(),            // Einträge, neueste zuerst (abgelaufene/kaputte ausgeblendet)
+  get(code), put(code, patch) /* anlegen nur mit token+me */, update(code, fn), remove(code),
+  purge(),           // abgelaufene/kaputte physisch löschen
+  markOpened(code),  // Raum geöffnet: alerts leeren, „move:“-Merker wieder scharf, opened = jetzt
+  alertCount(),      // Räume mit offenen Hinweisen (Badge)
+  subscribe(fn) → off,  // eigene Änderungen + `storage`-Ereignis anderer Tabs
+  migrate(sessionStorage) → string[]  // alte rps.token./me./pending./recorded.<code> übernehmen + löschen
+}
+sharedRoomStore()    // ein Store für die ganze App (main.js, Screens, createRoomSession())
+createRoomSession(storage|store?) → { store, get/set/clear(code), get/set/clearPending(code),
+                                      wasRecorded/markRecorded(code, id) }   // Schnittstelle wie früher
+summaryFromState(state, me) → Summary   // wie `watch`, aus einem vollen `state` (Raum-Screen merkt sie sich)
+describeRoom(entry) → { text, tone: 'wait'|'turn'|'run'|'done', who }  // „Wartet auf Gegner …“, „Ben will Revanche“ …
+ageText(ms) → „gerade eben“ | „vor 5 Min.“ | „vor 3 Std.“
+ROOMS_KEY = 'rps.rooms.v1', ROOM_TTL_MS = 24 h
+```
+Eintrag je Code: `{ code, token, me, type, role: 'host'|'player'|'spectator', variant, bestOf, host (Name),
+opponent (Name), stage („Halbfinale“), created, opened, pending, recorded[], notified[], alerts[{kind,text,at}],
+summary }`. Verfällt 24 h nach `created`; jeder Zugriff liest frisch (mehrere Tabs = derselbe Spieler).
+Speicher voll → beendete Räume und lange Listen werden zuerst geopfert; gesperrter Speicher wirft nie.
+
+### `watcher.js` (DOM-frei) – Hintergrund-Wächter
+```js
+createWatcher({ store, apiFn? = api, timers?, isHidden?, events? = document, now?,
+                onEvent(ev: { code, kind, key, text, title }), onGone(code, reason) })
+  → { start(), stop(), setActive(code|null), poke(), running, active, failures }
+detectEvents(prev, next, { notified }) → [{ kind, key, text, title }]  // nach Priorität
+WATCH_MS = { visible: 4000, hidden: 15000 }, watchBackoff(n) (4 s · 2^(n−1), max. 60 s), WATCH_MAX_ROOMS = 10
+```
+Fragt alle Räume außer `active` (zeigt der Raum-Screen gerade, der pollt selbst) per `watch` ab – max. 10
+je Anfrage, bei mehr rotierend – mit `since` = gemerkte `summary.version`. Ruht ohne Räume und wacht bei
+Änderungen im Store auf; beim Sichtbarwerden des Tabs sofort. `gone` (left/forbidden/notFound) → Eintrag
+löschen (nur wenn das Token noch dasselbe ist).
+Ereignisse (`kind` → Schlüssel in `notified`, je Raum + Schlüssel nur einmal, auch über Reloads):
+`joined` (Duell: Lobby → running mit Gegner), `match:<id>` (Turnier: neues myMatch), `rematch:<version>`,
+`move:<myMatch>` (needsMove wurde true; erneut erst nach `markOpened`), `finished:<version>` (Turnier vorbei).
+Pro Abfrage und Raum wird nur das wichtigste gemeldet (`EVENT_PRIORITY`), es landet auch in `alerts` (Badge).
+`updated` allein ist kein Ereignis.
+
+### `notify.js` – Benachrichtigungen außerhalb der Seite
+```js
+createNotifier({ NotificationImpl?, storage?, isHidden?, focus?, onOpen(code) }) → {
+  supported, permission() → 'granted'|'denied'|'default'|'unsupported', isEnabled(),
+  enable() → Promise<permission>  // nur aus einem Klick; fragt den Browser, setzt rps.notify
+  disable(), shouldOfferHint(), dismissHint(),
+  send({ title, body, code, tag? }) → Notification|null  // nur bei verstecktem Tab + Erlaubnis, sonst still
+}
+createTitleBlinker({ doc?, timers?, intervalMs? = 1000 }) → { alert(text) → bool, stop(), dispose(), active, count }
+```
+Ohne Service Worker; Icon `assets/img/icon-192.png`, `tag: rps-<code>` (zwei Tabs → eine Meldung).
+Klick fokussiert das Fenster und öffnet den Raum. Wirft der Konstruktor (Android ohne SW) → still.
+Tab-Titel wechselt nur bei verstecktem Tab zwischen normal und „(n) Ben ist da!“ und wird beim
+Sichtbarwerden zurückgesetzt. `main.js` lädt `watcher.js`/`notify.js` erst, sobald es offene Räume gibt
+(Startseite bleibt bei 22 Requests), und verbindet alles: Ereignis → Toast mit „Zum Spiel“ (15 s,
+Schließen-Knopf), `audio.play('join')`, Tab-Titel, System-Benachrichtigung.
 
 ## Arena-Controller
 
@@ -176,7 +236,7 @@ Warteschlange); `proof` = Gegner-Zug/Nonce/Hash aus `history`, damit der Control
 - `cpu-opponent.js`: `createCpuOpponent({ level, variant, bestOf }, { createAI?, storage? })` → Adapter.
   Legt `ai.pick()` + `commitHash(move, randomHex())` **vor** der Spielerwahl fest.
 - `router.js`: `parseHash(hash) → { name, params }`, `hrefFor(name, params)`, `ROUTES`, `ROOM_CODE_RE`.
-  Routen: `#/` home, `#/cpu`, `#/play`, `#/stats`, `#/settings`, `#/duel`, `#/tournament`, `#k7f3qa` room.
+  Routen: `#/` home, `#/cpu`, `#/play`, `#/stats`, `#/settings`, `#/duel`, `#/tournament`, `#/games` (Meine Spiele), `#k7f3qa` room.
 - `settings.js`: `createSettings(storage)` → `get/setName`, `get/setReducedFx`, `get/setInsight`,
   `get/setCpuSetup`; `sanitizeName`, `cleanName`, `truncateName`, `graphemes`, `normalizeCpuSetup`,
   `safeStorage`. Schlüssel: `rps.name`, `rps.reducedFx`, `rps.insight`, `rps.cpuSetup.v1`.
@@ -189,7 +249,9 @@ Warteschlange); `proof` = Gegner-Zug/Nonce/Hash aus `history`, damit der Control
 
 ### Screens (`ui/`)
 Jeder Screen exportiert `title` und `render(ctx) → { el, focus?, dispose? }`;
-`ctx = { settings, prefs, announce, navigate, params }`. `main.js` wechselt per View Transition
+`ctx = { settings, prefs, announce, navigate, params, rooms, watcher }`
+(`rooms` = gemeinsamer Raum-Store, `watcher` = `{ poke() }`). Lobby und Einstellungen bauen sich ihren
+`createNotifier()` selbst (Zustand liegt nur in `rps.notify`/`rps.notifyHint`). `main.js` wechselt per View Transition
 und fokussiert danach die `h1`.
 
 ## Server-API: Antwort von `state`
@@ -351,8 +413,8 @@ createCooldown(ms, { timers?, onChange? }) → { take() → bool, active }
 
 Ablauf einer Runde:
 1. `roundOpen` sobald eine neue Runde (`roundCount`) beginnt. `submitMove(move)`: Nonce (16 Byte hex) →
-   `commitHash` → Pending `{ matchId, round, move, nonce, hash }` in `sessionStorage`
-   (`rps.pending.<code>`) → `commit` → `poke()`.
+   `commitHash` → Pending `{ matchId, round, move, nonce, hash }` im Raum-Eintrag
+   (`rps.rooms.v1` → `pending`, localStorage) → `commit` → `poke()`.
    Fehler: endgültige 4xx verwerfen das Pending. Bei Status 0/5xx (`retryable`) bleibt es (der Server hat
    den Commit evtl. gespeichert), `poke()`; zeigt der Server `cur.committed[me]`, gilt der Zug als
    abgegeben (`moveRestored`, bzw. kein Fehler, falls das schon während des Requests sichtbar war).
@@ -376,7 +438,7 @@ Weitere Ereignisse: `opponentStatus` (`choosing`/`ready`/`offline`/`left`), `dea
 `claimAvailable` (Gegner ≥ 45 s offline), `reaction` (nur neue IDs), `moveRestored` (Reload nach
 eigenem Commit), `error` (deutscher Text; Reaktionen mit 429 werden still ignoriert).
 
-Reload: `rps.token.<code>` + `rps.me.<code>` behalten den Platz; `matchStart` liefert `score` und
+Reload: Token + ID im Raum-Eintrag (`rps.rooms.v1`) behalten den Platz – auch in einem zweiten Tab; `matchStart` liefert `score` und
 `history` der bisherigen Runden; ein schon abgegebener Zug wird per `moveRestored` angezeigt und nach
 `lockedAt` aus dem Pending aufgedeckt.
 
@@ -390,9 +452,9 @@ Weitere DOM-freie Module dazu:
   `StateHandlerError` an `onError` (kein Verbindungsfehler) und übernimmt die Version nicht – der Zustand
   wird beim nächsten Poll erneut verarbeitet. Meldet `events` (window) „online“, wird sofort neu geladen
   (kein Warten auf den Backoff; der Verbindungshinweis verschwindet beim ersten Erfolg).
-  `createRoomSession(storage)` → `get/set/clear(code)`, `get/set/clearPending(code)`,
-  `wasRecorded/markRecorded(code, id)` (IDs `m:<match>`, `t:<matches>`, `confetti:t:<matches>`; sessionStorage-Schlüssel `rps.token.`, `rps.me.`,
-  `rps.pending.`, `rps.recorded.` + Code).
+  `createRoomSession(storage)` (re-exportiert aus `rooms.js`) → `get/set/clear(code)`, `get/set/clearPending(code)`,
+  `wasRecorded/markRecorded(code, id)` (IDs `m:<match>`, `t:<matches>`, `confetti:t:<matches>`), gespeichert im
+  Raum-Eintrag unter `rps.rooms.v1` (localStorage).
 - `bracket.js`: `buildBracket(state, me)` → `{ rounds: [{ index, title, matches: [{ id, label, status,
   mine, slots: [{ id, name, score, won, me, left, placeholder }] }] }], champion }`,
   `roundTitle(i, total)` (Finale/Halbfinale/Viertelfinale/Achtelfinale/Runde n),
@@ -400,7 +462,9 @@ Weitere DOM-freie Module dazu:
   (`spectator`/`playing`/`waiting`/`out`/`champion`), `tournamentKey(state)`, `myLiveMatchId(built)`,
   `shouldScrollToMatch(prev, next)` (Baum scrollt nur beim ersten Rendern/Matchwechsel).
 
-Screens: `#/duel` und `#/tournament` = Raum erstellen (`ui/create-room.js`), `#<code>` = `ui/room.js`
+Screens: `#/games` = „Meine Spiele“ (`ui/games.js`: Karten mit Status, Öffnen/Link teilen/Entfernen →
+`leave`, leerer Zustand; Header-Icon und Startseiten-Karte nur bei offenen Räumen, mit Badge);
+`#/duel` und `#/tournament` = Raum erstellen (`ui/create-room.js`), `#<code>` = `ui/room.js`
 (Einladung `ui/invite.js` → Lobby `ui/lobby.js` mit `ui/share.js` → Arena bzw. Turnierbaum
 `ui/bracket-view.js`). Turnier-Statistik: `recordMatch({ mode: 'tournament' })` je Match (Statistik-Seite:
 Zeile „Turnier-Matches“) und einmal `recordTournament({ won })` pro beendetem Turnier.

@@ -13,6 +13,13 @@ function memory() {
   return { getItem: (k) => m.get(k) ?? null, setItem: (k, v) => m.set(k, String(v)), removeItem: (k) => m.delete(k) };
 }
 
+/** Sitzung mit eigenem Platz in CODE (Pending/Recorded hängen am Raum-Eintrag). */
+function seated() {
+  const s = createRoomSession(memory());
+  s.set(CODE, { token: 'tok', me: A });
+  return s;
+}
+
 /** Server-Zustand eines Duells mit Match m1 (A = Index 0, B = Index 1). */
 function duel({ history = [], cur = {}, winner = null, end = null, score = [0, 0], dropped = 0,
   players = null, rematch = [], series = {}, reactions = [], current = 'm1', extraMatches = {}, version = 1 } = {}) {
@@ -47,7 +54,7 @@ function fakeTimers() {
   return t;
 }
 
-function setup(state, { me = A, now = () => 0, session = createRoomSession(memory()), timers = fakeTimers() } = {}) {
+function setup(state, { me = A, now = () => 0, session = seated(), timers = fakeTimers() } = {}) {
   const calls = [];
   const events = [];
   let pokes = 0;
@@ -154,7 +161,7 @@ test('Fairness: vor history taucht kein Gegnerzug in Ereignissen auf', async () 
 });
 
 test('Reload nach eigenem Commit: Zug wiederhergestellt und später aufgedeckt', async () => {
-  const session = createRoomSession(memory());
+  const session = seated();
   session.set(CODE, { token: 'tok', me: A });
   session.setPending(CODE, { matchId: 'm1', round: 1, move: 'paper', nonce: 'p'.repeat(32), hash: 'h' });
   const history = [{ m: ['rock', 'rock'], n: ['a', 'b'], h: ['c', 'd'], w: -1, f: false }];
@@ -199,7 +206,7 @@ test('Matchende im Spiel: matchOver (kein replay), Revanche-Status, Serie', () =
 });
 
 test('Schon gezähltes Match beim Start → replay (keine doppelte Statistik)', () => {
-  const session = createRoomSession(memory());
+  const session = seated();
   session.markRecorded(CODE, 'm:m1');
   const t = setup(duel({ score: [0, 2], winner: 1, end: 'score' }), { session });
   assert.equal(t.last('matchOver').replay, true);
@@ -207,7 +214,7 @@ test('Schon gezähltes Match beim Start → replay (keine doppelte Statistik)', 
 });
 
 test('Reload mitten in der Matchende-Animation: noch nicht gezähltes Match wird gezählt, danach nie wieder', () => {
-  const session = createRoomSession(memory());
+  const session = seated();
   const t = setup(duel({ score: [0, 2], winner: 1, end: 'score' }), { session });
   const over = t.last('matchOver');
   assert.equal(over.replay, false, 'noch nicht gezählt → zählen');
@@ -274,7 +281,7 @@ test('409 mit bekanntem, anderem Server-Hash: alter Pending wird verworfen', asy
 });
 
 test('Reveal schlägt fehl (Netz) → eigener Retry mit Backoff, ohne neue Server-Version', async () => {
-  const session = createRoomSession(memory());
+  const session = seated();
   session.setPending(CODE, { matchId: 'm1', round: 0, move: 'paper', nonce: 'p'.repeat(32), hash: 'h' });
   const t = setup(duel({ cur: { committed: [true, false] } }), { session });
   t.apiFn.fail = { reveal: new ApiError('Keine Verbindung zum Server.', 0) };
@@ -293,7 +300,7 @@ test('Reveal schlägt fehl (Netz) → eigener Retry mit Backoff, ohne neue Serve
 });
 
 test('Reveal-Retry endet, wenn die Runde vorbei ist oder der Adapter entsorgt wurde', async () => {
-  const session = createRoomSession(memory());
+  const session = seated();
   session.setPending(CODE, { matchId: 'm1', round: 0, move: 'paper', nonce: 'p'.repeat(32), hash: 'h' });
   const locked = (version) => duel({ version, cur: { committed: [true, true], lockedAt: 990, deadline: 1010 } });
   const t = setup(duel({ cur: { committed: [true, false] } }), { session });
@@ -463,7 +470,7 @@ test('Forfeit durch Commit-Frist: Runde ohne Züge, kein Beweis, Punkt an den W�
 });
 
 test('Reload direkt nach dem Klick: gespeicherter Zug passt zum Server-Hash → weiter als abgegeben', async () => {
-  const session = createRoomSession(memory());
+  const session = seated();
   const hash = await commitHash('rock', 'r'.repeat(32));
   session.setPending(CODE, { matchId: 'm1', round: 0, move: 'rock', nonce: 'r'.repeat(32), hash });
   const t = setup(duel({ cur: { committed: [true, false], commit: [hash, null] } }), { session });
@@ -474,7 +481,7 @@ test('Reload direkt nach dem Klick: gespeicherter Zug passt zum Server-Hash → 
 });
 
 test('Reload: gespeicherter Zug passt NICHT zum Server-Hash → nicht aufdecken, verständlicher Hinweis', () => {
-  const session = createRoomSession(memory());
+  const session = seated();
   session.setPending(CODE, { matchId: 'm1', round: 0, move: 'rock', nonce: 'r'.repeat(32), hash: 'anders' });
   const t = setup(duel({ cur: { committed: [true, true], commit: ['server', 'x'], lockedAt: 990 } }), { session });
   assert.deepEqual(t.last('moveRestored'), { move: null });

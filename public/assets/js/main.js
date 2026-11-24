@@ -5,13 +5,16 @@ import * as audio from './audio.js';
 import * as fx from './fx.js';
 import { mountHeader } from './ui/header.js';
 import { prefersLessMotion } from './ui/dom.js';
-import { initToasts } from './ui/toast.js';
+import { initToasts, showToast } from './ui/toast.js';
 import * as home from './ui/home.js';
+import { sharedRoomStore } from './rooms.js';
 
 const APP_TITLE = 'Schere Stein Papier';
 const LIVE_CLEAR_MS = 50;
 const PREFETCH_FALLBACK_MS = 1500;
 const LOAD_ERROR_TEXT = 'Laden fehlgeschlagen – bitte Seite neu laden.';
+/** Toast „Ben ist da“ bleibt länger stehen (mit Schließen-Knopf), verdeckt aber nicht dauerhaft. */
+const EVENT_TOAST_MS = 15_000;
 
 /**
  * Routenname → Loader für das Screen-Modul { title, render(ctx) → { el, focus?, dispose? } }.
@@ -26,6 +29,7 @@ const LOADERS = Object.freeze({
   duel: () => import('./ui/create-room.js').then((m) => m.createRoomScreen('duel')),
   tournament: () => import('./ui/create-room.js').then((m) => m.createRoomScreen('tournament')),
   room: () => import('./ui/room.js'),
+  games: () => import('./ui/games.js'),
 });
 /** Name → geladenes Modul oder laufendes Promise. */
 const screens = new Map([['home', home]]);
@@ -51,6 +55,47 @@ const app = document.getElementById('app');
 const live = document.getElementById('live');
 const settings = createSettings();
 const reducedMotionQuery = globalThis.matchMedia?.('(prefers-reduced-motion: reduce)');
+
+// ─── „Meine Spiele“: offene Räume, Hintergrund-Wächter, Benachrichtigungen ───
+// Wächter + Benachrichtigungen werden erst geladen, wenn es offene Räume gibt (Startseite bleibt schlank).
+const rooms = sharedRoomStore();
+let watcher = null;
+let notifier = null;
+let blinker = null;
+let activeRoom = null;
+let servicesLoading = false;
+const roomToasts = new Map(); // code → offener Ereignis-Toast
+
+function closeRoomToast(code) {
+  roomToasts.get(code)?.close();
+  roomToasts.delete(code);
+}
+
+/** Ereignis aus dem Wächter: Toast mit Sprung-Button, Sound, Tab-Titel, ggf. System-Benachrichtigung. */
+function onRoomEvent(ev) {
+  closeRoomToast(ev.code);
+  roomToasts.set(ev.code, showToast(ev.text, {
+    kind: 'success', duration: EVENT_TOAST_MS,
+    action: { label: 'Zum Spiel', onClick: () => navigate(hrefFor('room', { code: ev.code })) },
+  }));
+  audio.play('join');
+  blinker?.alert(ev.title);
+  notifier?.send({ title: ev.title, body: ev.text, code: ev.code });
+}
+
+function startServices() {
+  if (servicesLoading || rooms.list().length === 0) return;
+  servicesLoading = true;
+  Promise.all([import('./watcher.js'), import('./notify.js')]).then(([w, n]) => {
+    notifier = n.createNotifier({ onOpen: (code) => navigate(hrefFor('room', { code })) });
+    blinker = n.createTitleBlinker();
+    watcher = w.createWatcher({ store: rooms, onEvent: onRoomEvent });
+    watcher.setActive(activeRoom);
+    watcher.start();
+  }, () => { servicesLoading = false; });
+}
+/** Für Screens: Wächter sofort abfragen lassen (falls schon geladen). */
+const watcherHandle = Object.freeze({ poke: () => watcher?.poke() });
 
 // ─── Einstellungen, die die ganze App betreffen ───
 const prefListeners = new Set();
@@ -119,6 +164,11 @@ function render() {
     return;
   }
   lastHash = location.hash;
+  // Den angezeigten Raum pollt der Raum-Screen selbst; der Wächter lässt ihn aus.
+  const roomCode = route.name === 'room' ? route.params.code : null;
+  activeRoom = roomCode;
+  watcher?.setActive(roomCode);
+  if (roomCode) closeRoomToast(roomCode);
   const seq = ++renderSeq;
   const cached = screens.get(route.name);
   if (cached && !(cached instanceof Promise)) {
@@ -141,7 +191,7 @@ function render() {
 function show(route, screen) {
   current?.dispose?.();
   fx.clear?.();
-  const next = screen.render({ settings, prefs, announce, navigate, params: route.params });
+  const next = screen.render({ settings, prefs, announce, navigate, params: route.params, rooms, watcher: watcherHandle });
   current = next;
   document.title = route.name === 'home' ? APP_TITLE : `${screen.title} – ${APP_TITLE}`;
   root.dataset.route = route.name;
@@ -200,12 +250,17 @@ function init() {
   applyReducedFx();
   reducedMotionQuery?.addEventListener?.('change', applyReducedFx);
   fx.initFx(document.getElementById('fx'));
-  mountHeader(document.getElementById('app-header'), { settings, prefs });
+  mountHeader(document.getElementById('app-header'), { settings, prefs, rooms });
+  // Alte Sitzungen (sessionStorage, vor „Meine Spiele“) übernehmen, Abgelaufenes wegräumen
+  try { rooms.migrate(globalThis.sessionStorage); } catch { /* Speicher gesperrt */ }
+  rooms.purge();
   window.addEventListener('pointerdown', unlockAudioOnce, true);
   window.addEventListener('keydown', unlockAudioOnce, true);
   document.addEventListener('click', playClick);
   window.addEventListener('hashchange', render);
   render();
+  startServices();
+  rooms.subscribe(startServices);
   prefetchScreens();
 }
 

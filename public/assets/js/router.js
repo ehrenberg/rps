@@ -1,5 +1,5 @@
 // Hash-Routing (DOM-frei): wandelt location.hash in eine Route und zurück.
-// '#/' Start, '#/cpu', '#/play', '#/stats', '#/settings', '#/duel', '#/tournament',
+// '#/' Start, '#/cpu', '#/play', '#/stats', '#/settings', '#/duel', '#/tournament', '#/games' (Meine Spiele),
 // '#k7f3qa' = Online-Raum (6 Zeichen aus dem Raumcode-Alphabet).
 
 export const ROOM_CODE_RE = /^[23456789abcdefghjkmnpqrstuvwxyz]{6}$/;
@@ -13,6 +13,7 @@ export const ROUTES = Object.freeze({
   settings: '/settings',
   duel: '/duel',
   tournament: '/tournament',
+  games: '/games',
 });
 
 const PATH_TO_NAME = new Map(Object.entries(ROUTES).map(([name, path]) => [path, name]));

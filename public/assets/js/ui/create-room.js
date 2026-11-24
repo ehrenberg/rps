@@ -50,7 +50,12 @@ export function createRoomScreen(type) {
           submit.setAttribute('aria-busy', 'true');
           try {
             const res = await api('create', { type, name: playerName, variant: setup.variant, bestOf: setup.bestOf });
-            createRoomSession().set(res.code, { token: res.token, me: res.me });
+            // Ausgangslage für „Meine Spiele“: Lobby ohne Gegner (der Wächter meldet dann den Beitritt)
+            createRoomSession().set(res.code, {
+              token: res.token, me: res.me, type, role: 'host', variant: setup.variant, bestOf: setup.bestOf, host: playerName,
+              summary: { version: null, type, variant: setup.variant, bestOf: setup.bestOf, status: 'lobby', me: res.me, isHost: true,
+                players: 1, spectator: false, left: false, opponent: null, myMatch: null, needsMove: false, rematchWanted: false, champion: null },
+            });
             navigate(hrefFor('room', { code: res.code }));
           } catch (err) {
             showError(err);

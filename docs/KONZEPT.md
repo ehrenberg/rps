@@ -83,7 +83,12 @@ Gegen den Computer genauso, nur startet der Countdown direkt nach deinem Klick.
 5. **Matchende:** Sieg-/Niederlage-Overlay, Konfetti bzw. „Regenwolke“, Revanche, Menü.
 6. **Turnierbaum:** Bracket mit Live-Status, eigenes Match hervorgehoben.
 7. **Statistik:** Siege/Niederlagen/Unentschieden je Modus und Stufe, Zugverteilung, längste Siegesserie, Lieblingszug, „Wie vorhersehbar bist du?“ (Entropie). Button „Statistik zurücksetzen“.
-8. **Footer:** Links zu Impressum und Datenschutz auf bastianswelt.de.
+8. **Meine Spiele:** alle offenen Duelle/Turniere als Karten (Typ, Variante · Best of, Status in Worten wie
+   „Wartet auf Gegner …“ oder „Läuft – du bist dran!“, Alter), Öffnen / Link teilen / Entfernen. Man kann
+   die Lobby verlassen und mehrere Spiele parallel offen haben; tritt jemand bei oder beginnt das eigene
+   Turnier-Match, gibt es einen Toast „Zum Spiel“, ein Badge, einen blinkenden Tab-Titel und – nach
+   Zustimmung – eine System-Benachrichtigung.
+9. **Footer:** Links zu Impressum und Datenschutz auf bastianswelt.de.
 
 ## Grafik & Atmosphäre
 

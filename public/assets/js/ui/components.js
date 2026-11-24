@@ -125,3 +125,15 @@ export function confirmDialog({ title, text, confirmLabel = 'OK', cancelLabel = 
     dialog.showModal();
   });
 }
+
+/**
+ * Zähler-Badge für „Meine Spiele“: sichtbare Zahl (aria-hidden) plus Text für Screenreader.
+ * n = 0 → null (kein Badge).
+ */
+export function countBadge(n, { className = 'badge' } = {}) {
+  if (!n) return null;
+  return [
+    h('span', { class: className, 'aria-hidden': 'true' }, n > 9 ? '9+' : String(n)),
+    h('span', { class: 'visually-hidden' }, n === 1 ? ' (1 Spiel mit Neuigkeiten)' : ` (${n} Spiele mit Neuigkeiten)`),
+  ];
+}

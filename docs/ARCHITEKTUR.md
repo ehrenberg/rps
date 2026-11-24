@@ -39,7 +39,10 @@ rps/
 │   │       ├── cpu-opponent.js Adapter: Computer-Gegner (Commit vor Spielerwahl)
 │   │       ├── online-opponent.js Adapter: Online-Gegner (Commit-Reveal über API)
 │   │       ├── ai.js           Computer-Stufen
-│   │       ├── net.js          API-Client, Polling mit Backoff, Raum-Session (sessionStorage)
+│   │       ├── net.js          API-Client, Polling mit Backoff
+│   │       ├── rooms.js        offene Räume „Meine Spiele“ (localStorage rps.rooms.v1, 24 h), Raum-Session
+│   │       ├── watcher.js      Hintergrund-Wächter: watch-Sammelabfrage, Ereignisse erkennen
+│   │       ├── notify.js       System-Benachrichtigung (Notification API) + blinkender Tab-Titel
 │   │       ├── bracket.js      Turnierbaum-Layout und Match-Status (DOM-frei)
 │   │       ├── crypto.js       SHA-256 (crypto.subtle + Fallback), Nonce
 │   │       ├── hands.js        SVG-Hände
@@ -48,7 +51,7 @@ rps/
 │   │       ├── stats.js        localStorage-Statistik
 │   │       ├── qr.js           QR-Code-Generator (eigener Code)
 │   │       └── ui/…            Screens + Komponenten (home, room, invite, lobby, share, arena-view,
-│   │                           bracket-view, match-end, stats, settings, toast, …)
+│   │                           bracket-view, match-end, stats, settings, games, toast, …)
 │   ├── src/                    PHP-Logik (per .htaccess gesperrt)
 │   │   ├── .htaccess           "Require all denied"
 │   │   ├── handler.php         Aktionen: Eingabe → Logik → DB (ohne HTTP, testbar)
@@ -172,8 +175,12 @@ Datenpfad: Konstante `RPS_DATA_DIR` (vorher definierbar), sonst Umgebungsvariabl
 
 - Beim Erstellen/Beitreten erzeugt der Server eine öffentliche ID (`p_xxxx`) und ein geheimes
   **Token** (32 Byte, hex). Gespeichert wird nur `hash('sha256', token)`.
-- Der Client legt das Token in `sessionStorage` unter `rps.token.<raumcode>` ab
-  (Reload behält den Platz, neuer Tab = neuer Spieler). Keine Cookies.
+- Der Client legt Token + ID in `localStorage` unter `rps.rooms.v1` ab (ein Eintrag je Raumcode,
+  verfällt 24 h nach Erstellung). Reload, neuer Tab und Browser-Neustart behalten den Platz; der gleiche
+  Link in einem zweiten Tab ist derselbe Spieler (zwei Spieler im selben Browser: privates Fenster).
+  Alte `sessionStorage`-Einträge (`rps.token.<code>` …) werden beim Start übernommen. Keine Cookies.
+- „Meine Spiele“ listet alle Einträge; ein Hintergrund-Wächter fragt sie per `watch` ab (4 s, versteckt 15 s,
+  max. 10 Räume je Anfrage) – außer dem gerade angezeigten Raum, der selbst `state` pollt.
 - Jede Aktion schickt `{code, token}`; der Server prüft per `hash_equals`.
 
 ## API

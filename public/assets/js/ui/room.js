@@ -11,6 +11,7 @@ import { api, createPoller, createRoomSession, RECONNECT_TEXT, HTTP, StateHandle
 import { createOnlineOpponent, newReactions, maxReactionId } from '../online-opponent.js';
 import { tournamentRole, roundTitle, tournamentKey } from '../bracket.js';
 import { decideRoute, leaveClearsSession, myRunningMatch } from '../room-flow.js';
+import { summaryFromState } from '../rooms.js';
 import { VARIANT_NAMES } from '../rules.js';
 import { recordTournament, recordMatch } from '../stats.js';
 import { hrefFor } from '../router.js';
@@ -153,6 +154,22 @@ export function render({ params, settings, announce, navigate }) {
     recordTournament({ won: state.champion === creds.me });
   }
 
+  /** „Meine Spiele“: Kurzfassung merken (der Wächter meldet später nur, was hier noch nicht zu sehen war). */
+  function remember(state) {
+    const me = creds.me;
+    const summary = summaryFromState(state, me);
+    const self = state.players?.find((p) => p.id === me);
+    const host = state.players?.find((p) => p.id === state.host)?.name ?? null;
+    const stage = state.type === 'tournament' && state.status === 'running' && state.round && state.bracket?.length
+      ? roundTitle(state.round - 1, state.bracket.length) : null;
+    session.store.update(code, (e) => (e.token !== creds.token ? undefined : {
+      ...e, summary, type: state.type, variant: state.variant, bestOf: state.bestOf, host,
+      opponent: summary.opponent ?? e.opponent, stage,
+      role: self?.spectator ? 'spectator' : state.host === me ? 'host' : 'player',
+      alerts: [], opened: Date.now(),
+    }));
+  }
+
   function route(state) {
     if (!state || disposed) return;
     if (state.type === 'tournament' && state.status !== 'lobby') recordTournamentEnd(state);
@@ -175,6 +192,7 @@ export function render({ params, settings, announce, navigate }) {
       code, token: creds.token,
       onState: (state) => {
         lastState = state;
+        remember(state);
         route(state);
         floatReactions(state);
         stateErrorToast?.close();
@@ -204,8 +222,8 @@ export function render({ params, settings, announce, navigate }) {
   function showInvite() {
     const v = inviteView({
       code, settings, announce,
-      onJoined: ({ token, me }) => {
-        session.set(code, { token, me });
+      onJoined: ({ token, me, spectator }) => {
+        session.set(code, { token, me, role: spectator ? 'spectator' : 'player' });
         creds = { token, me };
         connect();
       },
@@ -216,7 +234,10 @@ export function render({ params, settings, announce, navigate }) {
   const onVisible = () => { if (document.visibilityState === 'visible') poller?.poke(); };
   document.addEventListener('visibilitychange', onVisible);
 
-  if (creds) connect();
+  if (creds) {
+    session.store.markOpened(code);
+    connect();
+  }
   else showInvite();
 
   return {

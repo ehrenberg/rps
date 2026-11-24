@@ -166,6 +166,31 @@ test('axe: Online-Duell (Lobby, Einladung, Arena, Revanche)', { skip: SKIP_AXE, 
   assertNoFindings();
 });
 
+test('axe: Meine Spiele (leer, Liste, Toast mit Badge, Startseite)', { skip: SKIP_AXE, timeout: 120_000 }, async () => {
+  for (const viewport of [MOBILE, DESKTOP]) {
+    const A = await open(viewport, '#/games');
+    await A.page.waitForSelector('.games-empty:not([hidden])');
+    await check(A.page, 'Meine Spiele leer', viewport);
+    const code = await createRoom(A.page, 'duel', 'Anna');
+    await A.page.goto(`${BASE_URL}/#/settings`);
+    await A.page.waitForSelector('.screen--settings');
+    const B = await open(viewport);
+    await joinRoom(B.page, code, 'Ben');
+    await A.page.waitForSelector('.toast--action', { timeout: WAIT_MS });
+    await A.page.waitForSelector('.header__games .badge');
+    await check(A.page, 'Einstellungen mit Toast', viewport);
+    await A.page.goto(`${BASE_URL}/#/`);
+    await A.page.waitForSelector('.card--games:not([hidden])');
+    await check(A.page, 'Startseite mit Meine Spiele', viewport);
+    await A.page.goto(`${BASE_URL}/#/games`);
+    await A.page.waitForSelector('.game--new');
+    await check(A.page, 'Meine Spiele Liste', viewport);
+    await A.context.close();
+    await B.context.close();
+  }
+  assertNoFindings();
+});
+
 /** Spielt zufällig, bis die Siegerehrung kommt (wie im Online-Test). */
 async function tournamentBot(page) {
   const moves = ['rock', 'paper', 'scissors'];
