@@ -16,6 +16,8 @@ Phasen 0–5 und Feinschliff (Phase 6) sind umgesetzt; offen ist nur der Livegan
 - **Gegen den Computer:** 4 Stufen bis zum lernenden „Gedankenleser“, Fairness-Hash vor jeder Runde
 - **Online-Duell:** Einladungslink + QR-Code, Commit-Reveal (Gegnerzug nie vorab sichtbar), Revanche + Serie, Emoji-Reaktionen
 - **Turnier:** bis 16 Spieler, K.-o.-Baum mit Freilosen, Zuschauer, Siegerehrung
+- **Meine Spiele:** mehrere offene Spiele parallel (24 h im Browser gemerkt), Hintergrund-Wächter meldet
+  Beitritt/Match-Start per Toast, Badge, Tab-Titel und optional System-Benachrichtigung
 - **Statistik** lokal im Browser, **Barrierefreiheit** WCAG AA (axe: 0 Verstöße), mobil inkl. Querformat
 
 Qualität: JS-Unit-Tests, PHP-Tests (PHP 8.1), HTTP-Smoke-Test, Playwright-E2E (CPU, Online,
