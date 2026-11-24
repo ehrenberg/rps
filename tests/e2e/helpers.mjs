@@ -43,10 +43,23 @@ export async function openPage(browser, viewport, hash = '#/') {
     if (msg.type() === 'error' || msg.type() === 'warning') problems.push(`${msg.type()}: ${msg.text()}`);
   });
   page.on('pageerror', (err) => problems.push(`pageerror: ${err.message}`));
-  page.on('requestfailed', (req) => problems.push(`requestfailed: ${req.url()}`));
+  page.on('requestfailed', (req) => problems.push(`requestfailed: ${req.url()} (${req.failure()?.errorText ?? '?'})`));
   page.on('response', (res) => { if (res.status() >= 400) problems.push(`HTTP ${res.status()}: ${res.url()}`); });
   await page.goto(`${BASE_URL}/${hash}`);
   return { page, context, problems };
+}
+
+const ABORTED_BY_NAVIGATION = /^requestfailed: .* \(net::ERR_ABORTED\)$/;
+
+/**
+ * Lädt die Seite neu. Ein Reload bricht laufende Requests (z. B. einen gerade offenen Poll)
+ * absichtlich ab – solche ERR_ABORTED-Meldungen aus genau diesem Reload sind kein App-Problem.
+ */
+export async function reloadPage({ page, problems }) {
+  const before = problems.length;
+  await page.reload({ waitUntil: 'load' });
+  const fresh = problems.splice(before).filter((p) => !ABORTED_BY_NAVIGATION.test(p));
+  problems.push(...fresh);
 }
 
 /** Wählt im Computer-Setup Stufe/Variante/Länge und startet. */
