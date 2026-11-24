@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  api, ApiError, createPoller, backoffDelay, pollInterval, POLL_MS, BACKOFF_MAX_MS, createRoomSession, SESSION_KEYS,
+  api, ApiError, createPoller, backoffDelay, pollInterval, POLL_MS, BACKOFF_MAX_MS, createRoomSession,
   API_TIMEOUT_MS, HTTP, FATAL_STATUS, StateHandlerError,
 } from '../../public/assets/js/net.js';
 
@@ -155,7 +155,7 @@ test('Raum-Sitzung: Token/ID, Pending-Zug, gezählte Matches, clear', () => {
   assert.equal(s.get('abc234'), null);
   s.set('abc234', { token: 'tok', me: 'p_a' });
   assert.deepEqual(s.get('abc234'), { token: 'tok', me: 'p_a' });
-  assert.equal(st.getItem(SESSION_KEYS.token('abc234')), 'tok');
+  assert.equal(JSON.parse(st.getItem('rps.rooms.v1')).abc234.token, 'tok', 'liegt in localStorage rps.rooms.v1');
   s.setPending('abc234', { matchId: 'm1', round: 0, move: 'rock', nonce: 'n' });
   assert.equal(s.getPending('abc234').move, 'rock');
   s.markRecorded('abc234', 'm1');

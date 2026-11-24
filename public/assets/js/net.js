@@ -1,6 +1,8 @@
 // API-Client, Polling und Raum-Sitzung (DOM-frei; fetch, Timer und Speicher injizierbar).
 // Vertrag: docs/SCHNITTSTELLEN.md („net.js“, „Server-API“, „Online-Adapter“).
 
+import { createRoomSession } from './rooms.js';
+
 export const API_URL = 'api.php';
 
 /** Poll-Intervalle (ms) laut ARCHITEKTUR „Polling“. */
@@ -194,49 +196,5 @@ export function createPoller({
   };
 }
 
-// ─── Raum-Sitzung (sessionStorage: neuer Tab = neuer Spieler, Reload behält den Platz) ───
-
-export const SESSION_KEYS = Object.freeze({
-  token: (code) => `rps.token.${code}`,
-  me: (code) => `rps.me.${code}`,
-  pending: (code) => `rps.pending.${code}`,
-  recorded: (code) => `rps.recorded.${code}`,
-});
-
-function safe(storage) {
-  return {
-    get(k) { try { return storage?.getItem(k) ?? null; } catch { return null; } },
-    set(k, v) { try { storage?.setItem(k, v); } catch { /* ignorieren */ } },
-    del(k) { try { storage?.removeItem(k); } catch { /* ignorieren */ } },
-  };
-}
-
-export function createRoomSession(storage = globalThis.sessionStorage) {
-  const s = safe(storage);
-  const readJson = (k) => { try { return JSON.parse(s.get(k) ?? 'null'); } catch { return null; } };
-  return {
-    /** { token, me } oder null */
-    get(code) {
-      const token = s.get(SESSION_KEYS.token(code));
-      const me = s.get(SESSION_KEYS.me(code));
-      return token && me ? { token, me } : null;
-    },
-    set(code, { token, me }) {
-      s.set(SESSION_KEYS.token(code), token);
-      s.set(SESSION_KEYS.me(code), me);
-    },
-    clear(code) {
-      for (const key of Object.values(SESSION_KEYS)) s.del(key(code));
-    },
-    /** Eigener verdeckter Zug der laufenden Runde, damit nach Reload noch aufgedeckt werden kann. */
-    getPending(code) { return readJson(SESSION_KEYS.pending(code)); },
-    setPending(code, pending) { s.set(SESSION_KEYS.pending(code), JSON.stringify(pending)); },
-    clearPending(code) { s.del(SESSION_KEYS.pending(code)); },
-    /** Bereits in der Statistik gezählte Match-/Turnier-IDs (kein Doppelzählen nach Reload). */
-    wasRecorded(code, id) { return (readJson(SESSION_KEYS.recorded(code)) ?? []).includes(id); },
-    markRecorded(code, id) {
-      const list = readJson(SESSION_KEYS.recorded(code)) ?? [];
-      if (!list.includes(id)) s.set(SESSION_KEYS.recorded(code), JSON.stringify([...list, id]));
-    },
-  };
-}
+// ─── Raum-Sitzung: liegt jetzt in rooms.js (localStorage `rps.rooms.v1`, „Meine Spiele“) ───
+export { createRoomSession };
