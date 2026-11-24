@@ -20,7 +20,7 @@ Jede Phase endet mit etwas Spielbarem. Abnahme jeweils im Browser (Desktop + Han
 - [x] Canvas-Partikel (Konfetti, Funken, Regen), Screen-Shake
 - [x] Web-Audio-Sounds, Ton-Schalter
 - [x] `prefers-reduced-motion` + Schalter „Effekte reduzieren“
-- **Abnahme:** 60 fps auf Mittelklasse-Handy, keine Ruckler beim Reveal.
+- **Abnahme:** 60 fps auf Mittelklasse-Handy, keine Ruckler beim Reveal. ✅ emuliert (375×812, DPR 3, CPU 4×): Reveal/Konfetti/Regen/Bracket-Scroll p95 16,7 ms; Dauertest `tests/e2e/perf.test.mjs`.
 
 ## Phase 3 – Lernende KI & Statistik ✅
 - [x] Gedankenleser-KI (Ensemble), Historie in localStorage, „Was denkt der Computer?“-Anzeige
