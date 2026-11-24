@@ -2,6 +2,17 @@
 Options -Indexes
 DirectoryIndex index.html
 AddDefaultCharset utf-8
+# Keine Server-Version in Apache-Fehlerseiten
+ServerSignature Off
+
+# Hash-Routing (#/…): der Server sieht nie App-Routen, daher kein ErrorDocument/Fallback auf
+# index.html – ein 404 betrifft nur wirklich fehlende Dateien und soll ehrlich 404 bleiben.
+
+# Dateien, die nie ausgeliefert werden dürfen (Doku, Skripte, DB, Backups, Editor-Reste),
+# falls so etwas versehentlich mit hochgeladen wird.
+<FilesMatch "(?i)(\.(md|sh|sql|sqlite\d*|sqlite\d*-(wal|shm|journal)|db|bak|old|orig|swp|swo|tmp|log|ini|env|dist|lock|zip|tar|gz)|~)$">
+  Require all denied
+</FilesMatch>
 
 <IfModule mod_mime.c>
   AddType text/javascript .js .mjs
@@ -21,6 +32,12 @@ AddDefaultCharset utf-8
   RewriteRule "(^|/)\.(?!well-known)" - [F]
 </IfModule>
 
+# Hinter einem TLS-terminierenden Proxy kennt Apache HTTPS nur über X-Forwarded-Proto;
+# so wird HSTS (env=HTTPS) auch dort gesendet.
+<IfModule mod_setenvif.c>
+  SetEnvIfNoCase X-Forwarded-Proto "^https$" HTTPS=on
+</IfModule>
+
 <IfModule mod_headers.c>
   Header always set Content-Security-Policy "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
   Header always set Referrer-Policy "no-referrer"
@@ -28,6 +45,8 @@ AddDefaultCharset utf-8
   Header always set X-Frame-Options "DENY"
   Header always set Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=(), interest-cohort=()"
   Header always set Cross-Origin-Opener-Policy "same-origin"
+  # Fremde Seiten dürfen unsere Dateien (Bilder, JSON, Skripte) nicht einbetten
+  Header always set Cross-Origin-Resource-Policy "same-origin"
   Header always set Strict-Transport-Security "max-age=31536000" env=HTTPS
   Header always unset X-Powered-By
 
@@ -35,16 +54,16 @@ AddDefaultCharset utf-8
   <FilesMatch "\.(html|php)$">
     Header set Cache-Control "no-store"
   </FilesMatch>
-  <FilesMatch "\.(js|css|svg|webmanifest)$">
+  <FilesMatch "\.(js|css|svg|webmanifest|txt)$">
     Header set Cache-Control "public, max-age=3600, must-revalidate"
   </FilesMatch>
-  <FilesMatch "\.(woff2|png)$">
+  <FilesMatch "\.(woff2|png|ico)$">
     Header set Cache-Control "public, max-age=2592000, immutable"
   </FilesMatch>
 </IfModule>
 
 <IfModule mod_deflate.c>
-  AddOutputFilterByType DEFLATE text/html text/css text/javascript application/json image/svg+xml application/manifest+json
+  AddOutputFilterByType DEFLATE text/html text/plain text/css text/javascript application/json image/svg+xml application/manifest+json image/vnd.microsoft.icon
 </IfModule>
 
 # PHP-Fehler nie ausgeben (falls vom Hosting erlaubt)
