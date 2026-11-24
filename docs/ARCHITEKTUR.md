@@ -14,7 +14,7 @@ Browser (Vanilla JS, ES-Module)                Netcup (Apache + PHP 8.x)
 - Gegen den Computer läuft **alles im Browser**, der Server wird nicht gebraucht.
 - Online-Duell und Turnier: der Server hält den Raumzustand, Clients pollen.
 
-## Ordnerstruktur (Ziel)
+## Ordnerstruktur
 
 ```
 rps/
@@ -25,21 +25,28 @@ rps/
 │   ├── api.php                 einziger Server-Einstiegspunkt
 │   ├── .htaccess               Sicherheitsheader, Zugriffsschutz
 │   ├── assets/
-│   │   ├── css/app.css
+│   │   ├── css/app.css         Design-Tokens, Layout, Screens
+│   │   ├── css/fx.css          Hände, Effekt-Keyframes, Emoji-Float
 │   │   ├── fonts/              selbst gehostete Fonts (OFL), woff2
+│   │   ├── img/                Favicon/App-Icons (SVG)
 │   │   └── js/
-│   │       ├── main.js         Start, Routing (#hash), Screen-Wechsel
+│   │       ├── main.js         Start, Routing, Screen-Wechsel, globale Einstellungen
+│   │       ├── router.js       Hash-Routen parsen/erzeugen (DOM-frei)
+│   │       ├── settings.js     lokale Einstellungen, Name, Computer-Setup (DOM-frei)
 │   │       ├── rules.js        Züge, Varianten, Wer-schlägt-wen, Verben
+│   │       ├── match.js        Match-Zustand: Runden, Punkte, Ende (DOM-frei, unveränderlich)
+│   │       ├── arena.js        Arena-Controller: Ablauf einer Runde, Adapter-Vertrag
+│   │       ├── cpu-opponent.js Adapter: Computer-Gegner (Commit vor Spielerwahl)
+│   │       ├── online-opponent.js Adapter: Online-Gegner (Commit-Reveal über API)
 │   │       ├── ai.js           Computer-Stufen
 │   │       ├── net.js          API-Client + Polling
 │   │       ├── crypto.js       SHA-256 (crypto.subtle + Fallback), Nonce
-│   │       ├── arena.js        Runden-Animation, Countdown, Reveal
 │   │       ├── hands.js        SVG-Hände
 │   │       ├── fx.js           Canvas-Partikel, Screen-Shake
 │   │       ├── audio.js        Web-Audio-Synth
 │   │       ├── stats.js        localStorage-Statistik
 │   │       ├── qr.js           QR-Code-Generator (eigener Code)
-│   │       └── ui/…            Screens (home, lobby, bracket, stats, …)
+│   │       └── ui/…            Screens + Komponenten (home, arena-view, lobby, bracket, stats, …)
 │   ├── src/                    PHP-Logik (per .htaccess gesperrt)
 │   │   ├── .htaccess           "Require all denied"
 │   │   ├── handler.php         Aktionen: Eingabe → Logik → DB (ohne HTTP, testbar)
@@ -54,7 +61,14 @@ rps/
 │   │   └── rules.php           Spiegel von rules.js
 │   └── data/                   SQLite-Datei (per .htaccess gesperrt)
 │       └── .htaccess
-└── tests/                      PHP- und JS-Tests (werden nicht hochgeladen)
+├── docker/, docker-compose.yml  Entwicklungsumgebung (Apache + PHP 8.1, gitleaks)
+├── .githooks/                  Pre-Commit: gitleaks, php -l, JS-Tests
+└── tests/                      werden nicht hochgeladen
+    ├── run.php, php/           PHP-Unit-Tests (eigener Mini-Runner)
+    ├── js/                     JS-Unit-Tests (node --test)
+    ├── e2e/                    Playwright-Tests gegen den Docker-Server
+    ├── demo/                   Demo-Seite für Hände/Effekte/Sounds
+    └── api_smoke.sh            HTTP-Smoke-Test
 ```
 
 > Wenn Netcup erlaubt, `data/` außerhalb des Webroots abzulegen, ist das besser.

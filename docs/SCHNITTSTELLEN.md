@@ -14,66 +14,78 @@ countersOf(move, variant), targetWins(bestOf)`
 `randomHex(n=16) → string`, `randomInt(n) → int`, `sha256Hex(str) → Promise<hex>`,
 `commitHash(move, nonce) → Promise<hex>` (= sha256(`move:nonce`)), `verifyCommit(hash, move, nonce) → Promise<bool>`
 
-### `hands.js`
+### `hands.js` ✅
 ```js
 // Große Hand für die Arena. side 'left' = Spieler (zeigt nach rechts), 'right' = Gegner (gespiegelt).
 createHand({ side }) → {
-  el,                            // HTMLElement (div.hand > svg), Größe per CSS (füllt Container)
-  setMove(move | 'fist', { pop = true } = {}),  // Form wechseln, optional mit Pop-Animation
-  shake(beats = 3, beatMs = 500) → Promise,     // Faust schüttelt im Takt (resolved am Ende)
-  setState('idle' | 'win' | 'lose' | 'draw'),   // Nachglühen/Absacken nach Reveal
+  el,                                   // div.hand > svg, data-move / data-state gesetzt
+  setMove(move | 'fist', { pop = true } = {}),
+  shake(beats = 3, beatMs = 500, { onBeat } = {}) → Promise,
+      // Faust hebt sich, Aufschläge bei beatMs, 2·beatMs, 3·beatMs → onBeat(i);
+      // Promise resolved beim letzten Aufschlag (= Reveal). Countdown/Sound über onBeat takten!
+  setState('idle' | 'win' | 'lose' | 'draw'),
+  enter(),                              // Hand gleitet von der Seite herein
 }
-handIcon(move) → SVGElement      // kleines Icon (für Zug-Buttons, Verlauf, Statistik), viewBox quadratisch
+handIcon(move) → SVGElement             // quadratische viewBox, Manschette in --icon-accent
 ```
-- Keine Abhängigkeit von anderen Modulen außer `rules.js`. Farben über CSS-Variablen
-  (`--hand-skin`, `--hand-skin-shade`, `--hand-outline`, `--accent-left`, `--accent-right`).
-- Respektiert `document.documentElement.dataset.reducedFx === '1'` und `prefers-reduced-motion`.
+- Handformen als Daten (`HAND_SHAPES`), DOM ohne `innerHTML`, Gradient-IDs pro Instanz eindeutig.
+- CSS-Variablen (alle mit Fallback): `--hand-skin`, `--hand-skin-shade`, `--hand-outline`,
+  `--accent-left`, `--accent-right`, `--icon-accent`, `--hand-glow`, `--fx-hand-shadow`.
+- Respektiert `html[data-reduced-fx="1"]` und `prefers-reduced-motion` (Timing bleibt gleich).
 
-### `fx.js`
+### `fx.js` ✅
 ```js
-initFx(canvas)                         // Vollbild-Canvas (position:fixed, pointer-events:none)
-confetti({ x?, y?, count? })           // Matchsieg
-sparks(x, y, { color? })               // Zusammenprall (Viewport-Koordinaten)
-rain({ duration = 2500 })              // Niederlage: Regenwolke
-burst(x, y, { color? })                // kleiner Treffer-Effekt (z. B. Punkt-Pip)
-screenShake(el = document.body, intensity = 1)
-floatEmoji(emoji, { x? })              // Emoji-Reaktion schwebt hoch (DOM, nicht Canvas)
-setReducedFx(bool)                      // reduziert: keine Partikel/Shake, Spiel bleibt gleich
+initFx(canvas)                          // Vollbild-Canvas .fx-canvas, DPR-korrekt, rAF nur bei aktiven Partikeln
+confetti({ x?, y?, count? })
+sparks(x, y, { color? })
+rain({ duration = 2500, x?, y?, width? })
+burst(x, y, { color? })
+screenShake(el, intensity = 1)          // Arena-Element übergeben, nicht body
+floatEmoji(emoji, { x?, y? })           // DOM, textContent
+setReducedFx(bool)                      // setzt auch html[data-reduced-fx]
+clear()                                 // alle Effekte sofort beenden (bei Screenwechsel)
 ```
+Partikeltypen mit gemeinsamer Schnittstelle `{ blend, update, draw }`, Pool max. 700,
+framerate-unabhängige Physik. Styles in `assets/css/fx.css`.
+**Performance:** `backdrop-filter` auf großen Flächen halbiert die FPS bei Partikeln – vermeiden.
 
-### `audio.js`
+### `audio.js` ✅
 ```js
-unlock()                 // bei erster Nutzeraktion aufrufen (AudioContext erzeugen/resumen)
-setEnabled(bool), isEnabled() → bool   // Zustand in localStorage 'rps.sound' ('1'/'0'), Standard an
-play(name)               // 'click','tick','shake','clash','win','lose','draw','matchWin','matchLose','pop','join','countdown'
+unlock(), setEnabled(bool), isEnabled(), play(name), SOUND_NAMES
+// 'click','tick','shake','clash','win','lose','draw','matchWin','matchLose','pop','join','countdown'
 ```
+Rezepte als Tabelle (`SOUND_RECIPES`), AudioContext lazy, automatisches Entsperren bei erster
+Nutzeraktion, gleicher Sound max. alle 30 ms, wirft nie.
 
-### `qr.js`
+### `qr.js` ✅
 ```js
-qrMatrix(text, { ecc = 'M' } = {}) → boolean[][]   // true = dunkles Modul
-qrSvg(text, { ecc = 'M', margin = 4 } = {}) → SVGElement
+qrMatrix(text, { ecc = 'M', mask? } = {}) → boolean[][]   // Byte-Modus UTF-8, Version 1–10
+qrSvg(text, { ecc = 'M', margin = 4 } = {}) → SVGElement  // currentColor auf Weiß → dunkle Textfarbe nötig
 ```
+Zu langer Text wirft „Text ist zu lang für einen QR-Code.“ Echte Dekodierbarkeit per zbarimg getestet.
 
-### `ai.js`
+### `ai.js` ✅
 ```js
-createAI(level /*1..4*/, variant, { storage = localStorage } = {}) → {
-  level, name,               // name: 'Zufall' | 'Gewohnheitstier' | 'Taktiker' | 'Gedankenleser'
-  pick() → move,             // Zug des Computers für die nächste Runde (vor der Spielerwahl!)
-  observe(aiMove, playerMove),// nach jeder Runde (auch Unentschieden)
-  explain() → string | null, // nur Stufe 4: „Ich glaube, du wechselst nach einer Niederlage …“
+createAI(level /*1..4*/, variant, { storage = localStorage, random } = {}) → {
+  level, name, pick() → move, observe(aiMove, playerMove), explain() → string | null,
 }
-AI_LEVELS → [{ level, name, description }]
+AI_LEVELS, HISTORY_KEY ('rps.ai.history.v1'), HISTORY_MAX (300), loadHistory(storage, variant)
 ```
+- `random`: injizierbar für deterministische Tests. `storage: null` erlaubt.
+- Nur Stufe 4 liest/schreibt die Historie. `explain()` bei Stufe 4 nie null („Ich beobachte dich noch …“).
+- Stufe 4: Ensemble (Häufigkeit gesamt/10, Markov 1./2. Ordnung, Paar-Markov, Win-Stay/Lose-Shift,
+  Reaktion auf KI-Zug) × 3 Meta-Varianten, Punkte mit Verfall 0,9, 10 % Zufall.
 
-### `stats.js`
+### `stats.js` ✅
 ```js
-loadStats() → Stats              // Struktur wie in ARCHITEKTUR.md (rps.stats.v1), robust gegen kaputte Daten
-recordRound({ result: 'w'|'l'|'d', move })   // Rundenergebnis + eigener Zug
-recordMatch({ mode, result: 'w'|'l' })        // mode: 'cpu-1'…'cpu-4' | 'duel' | 'tournament'
-recordTournament({ won: bool })
-resetStats()
-summary(stats) → { favoriteMove, totalGames, winRate, entropy /*0..1*/, predictability /*Text*/ }
+loadStats(), recordRound({ result, move }), recordMatch({ mode, result }),
+recordTournament({ won }), resetStats()            // record*/reset geben neue Stats zurück
+summary(stats) → { favoriteMove, totalGames, winRate, entropy, predictability,
+                   totalRounds, roundWinRate, bestStreak, currentStreak }
+setStorage(storage?), STATS_KEY, emptyStats, normalizeStats, normalizedEntropy,
+predictabilityText, MATCH_MODES, TOURNAMENT_MODE
 ```
+`games.tournament` = `{ played, won, w, l }`. Unter 10 Zügen: „Noch zu wenig Daten“.
 
 ### `net.js`
 ```js
