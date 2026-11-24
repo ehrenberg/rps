@@ -431,6 +431,7 @@ export function createArenaView(opts) {
 
     dispose() {
       clearInterval(deadlineTimer);
+      handMe.stop?.(); handOpp.stop?.();
     },
 
     showError(message) {

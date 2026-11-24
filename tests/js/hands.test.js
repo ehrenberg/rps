@@ -242,6 +242,28 @@ test('createHand: neuer shake beendet laufenden sofort; setState wechselt Klasse
   } finally { mock.timers.reset(); restore(); }
 });
 
+test('createHand: stop() bricht shake ab – Promise resolved, onBeat nie mehr', async () => {
+  const restore = installFakeDom();
+  mock.timers.enable({ apis: ['setTimeout'] });
+  try {
+    const h = createHand();
+    const beats = [];
+    const p = h.shake(3, 500, { onBeat: (i) => beats.push(i) });
+    mock.timers.tick(500);
+    assert.deepEqual(beats, [0]);
+    const rig = h.el.querySelector('.hand__rig');
+    h.stop();
+    await p; // resolved, ohne dass weitere Zeit vergeht
+    mock.timers.tick(5000);
+    assert.deepEqual(beats, [0], 'nach stop() kein onBeat mehr');
+    assert.ok(rig.animations.every((a) => a.cancelled), 'Shake-Animation abgebrochen');
+    h.setState('win');
+    h.stop();
+    assert.ok(rig.animations.every((a) => a.cancelled), 'Zustandsanimation abgebrochen');
+    h.stop(); // mehrfach aufrufbar
+  } finally { mock.timers.reset(); restore(); }
+});
+
 test('toDom setzt Attribute und Kinder, lässt undefined weg', () => {
   const restore = installFakeDom();
   try {

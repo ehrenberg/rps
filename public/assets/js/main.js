@@ -7,27 +7,44 @@ import { mountHeader } from './ui/header.js';
 import { prefersLessMotion } from './ui/dom.js';
 import { initToasts } from './ui/toast.js';
 import * as home from './ui/home.js';
-import * as cpuSetup from './ui/cpu-setup.js';
-import * as arenaScreen from './ui/arena-screen.js';
-import * as statsScreen from './ui/stats-screen.js';
-import * as settingsScreen from './ui/settings-screen.js';
-import * as room from './ui/room.js';
-import { createRoomScreen } from './ui/create-room.js';
 
 const APP_TITLE = 'Schere Stein Papier';
 const LIVE_CLEAR_MS = 50;
+const PREFETCH_FALLBACK_MS = 1500;
+const LOAD_ERROR_TEXT = 'Laden fehlgeschlagen – bitte Seite neu laden.';
 
-/** Routenname → Screen-Modul { title, render(ctx) → { el, focus?, dispose? } } */
-const SCREENS = Object.freeze({
-  home,
-  cpu: cpuSetup,
-  play: arenaScreen,
-  stats: statsScreen,
-  settings: settingsScreen,
-  duel: createRoomScreen('duel'),
-  tournament: createRoomScreen('tournament'),
-  room,
+/**
+ * Routenname → Loader für das Screen-Modul { title, render(ctx) → { el, focus?, dispose? } }.
+ * Nur die Startseite ist statisch importiert (weniger Requests beim ersten Laden);
+ * der Rest wird nach dem ersten Rendern im Leerlauf vorgeladen.
+ */
+const LOADERS = Object.freeze({
+  cpu: () => import('./ui/cpu-setup.js'),
+  play: () => import('./ui/arena-screen.js'),
+  stats: () => import('./ui/stats-screen.js'),
+  settings: () => import('./ui/settings-screen.js'),
+  duel: () => import('./ui/create-room.js').then((m) => m.createRoomScreen('duel')),
+  tournament: () => import('./ui/create-room.js').then((m) => m.createRoomScreen('tournament')),
+  room: () => import('./ui/room.js'),
 });
+/** Name → geladenes Modul oder laufendes Promise. */
+const screens = new Map([['home', home]]);
+
+function loadScreen(name) {
+  if (!screens.has(name)) {
+    screens.set(name, LOADERS[name]().then(
+      (mod) => { screens.set(name, mod); return mod; },
+      (err) => { screens.delete(name); throw err; },
+    ));
+  }
+  return Promise.resolve(screens.get(name));
+}
+
+function prefetchScreens() {
+  const run = () => { for (const name of Object.keys(LOADERS)) loadScreen(name).catch(() => {}); };
+  if (globalThis.requestIdleCallback) requestIdleCallback(run, { timeout: PREFETCH_FALLBACK_MS });
+  else setTimeout(run, PREFETCH_FALLBACK_MS);
+}
 
 const root = document.documentElement;
 const app = document.getElementById('app');
@@ -85,6 +102,7 @@ function focusTarget(target) {
   if (!target.hasAttribute('tabindex')) target.setAttribute('tabindex', '-1');
   target.focus();
 }
+let renderSeq = 0;
 
 function render() {
   const route = parseHash(location.hash);
@@ -100,8 +118,27 @@ function render() {
     render();
     return;
   }
-  const screen = SCREENS[route.name];
   lastHash = location.hash;
+  const seq = ++renderSeq;
+  const cached = screens.get(route.name);
+  if (cached && !(cached instanceof Promise)) {
+    show(route, cached);
+    return;
+  }
+  loadScreen(route.name).then(
+    (screen) => { if (seq === renderSeq) show(route, screen); },
+    () => {
+      if (seq !== renderSeq) return;
+      const msg = document.createElement('p');
+      msg.className = 'noscript';
+      msg.textContent = LOAD_ERROR_TEXT;
+      app.replaceChildren(msg);
+      announce(LOAD_ERROR_TEXT);
+    },
+  );
+}
+
+function show(route, screen) {
   current?.dispose?.();
   fx.clear?.();
   const next = screen.render({ settings, prefs, announce, navigate, params: route.params });
@@ -169,6 +206,7 @@ function init() {
   document.addEventListener('click', playClick);
   window.addEventListener('hashchange', render);
   render();
+  prefetchScreens();
 }
 
 init();

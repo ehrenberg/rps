@@ -16,6 +16,23 @@
   <link rel="stylesheet" href="assets/css/app.css">
   <link rel="stylesheet" href="assets/css/fx.css">
   <link rel="modulepreload" href="assets/js/main.js">
+  <!-- Statischer Import-Graph der Startseite: ein Roundtrip statt Wasserfall über 4 Ebenen.
+       Muss zu main.js passen (geprüft in tests/js/preload.test.js); andere Screens lädt main.js nach. -->
+  <link rel="modulepreload" href="assets/js/router.js">
+  <link rel="modulepreload" href="assets/js/settings.js">
+  <link rel="modulepreload" href="assets/js/audio.js">
+  <link rel="modulepreload" href="assets/js/fx.js">
+  <link rel="modulepreload" href="assets/js/ui/header.js">
+  <link rel="modulepreload" href="assets/js/ui/dom.js">
+  <link rel="modulepreload" href="assets/js/ui/toast.js">
+  <link rel="modulepreload" href="assets/js/ui/home.js">
+  <link rel="modulepreload" href="assets/js/rules.js">
+  <link rel="modulepreload" href="assets/js/ai.js">
+  <link rel="modulepreload" href="assets/js/ui/icons.js">
+  <link rel="modulepreload" href="assets/js/ui/components.js">
+  <link rel="modulepreload" href="assets/js/ui/logo.js">
+  <link rel="modulepreload" href="assets/js/crypto.js">
+  <link rel="modulepreload" href="assets/js/hands.js">
   <script type="module" src="assets/js/main.js"></script>
 </head>
 <body>

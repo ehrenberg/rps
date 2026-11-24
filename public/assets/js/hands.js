@@ -585,7 +585,17 @@ export function createHand({ side = 'left' } = {}) {
     return anim ? anim.finished.catch(() => {}) : Promise.resolve();
   }
 
-  return { el, setMove, shake, setState, enter };
+  /**
+   * Erweiterung: alles anhalten (Screenwechsel). Shake-Timer und Animationen werden abgebrochen,
+   * ein offenes shake-Promise resolved sofort, onBeat wird danach nie mehr aufgerufen.
+   */
+  function stop() {
+    stopShake();
+    stateAnim?.cancel();
+    stateAnim = null;
+  }
+
+  return { el, setMove, shake, setState, enter, stop };
 }
 
 /** Kleines Icon im gleichen Stil (quadratische viewBox, ohne Ärmel). */

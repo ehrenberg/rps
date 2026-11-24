@@ -89,3 +89,10 @@ wie bei Wunschstern. Der FTP-Weg bleibt als Rückfall dokumentiert.
 **Begründung:** Ein Verfahren für beide Projekte auf demselben netcup-Webspace; atomare Releases mit Rückrollen,
 alte Dateien bleiben nicht liegen, die Datenbank übersteht jedes Deployment. Auf dem Server braucht es weiterhin
 nur PHP + SQLite (bash/tar nutzt nur die SSH-Sitzung beim Ausrollen).
+
+### 2026-11-24 – Screens nachladen, Start-Graph per modulepreload
+**Entscheidung:** `main.js` importiert nur die Startseite statisch; alle anderen Screens kommen per
+`import()` und werden nach dem ersten Rendern im Leerlauf vorgeladen. `index.html` lädt genau den
+statischen Start-Graphen per `modulepreload` (Test: `tests/js/preload.test.js`).
+**Begründung:** Gemessen (375×812, DPR 3, CPU 4×, 150 ms RTT, 1,6 Mbit/s): Startseite sichtbar nach
+1,2 s statt 2,1 s, 20 statt 41 Requests bis dahin. Kein Build-Schritt nötig.

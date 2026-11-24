@@ -25,6 +25,8 @@ createHand({ side }) → {
       // Promise resolved beim letzten Aufschlag (= Reveal). Countdown/Sound über onBeat takten!
   setState('idle' | 'win' | 'lose' | 'draw'),
   enter(),                              // Hand gleitet von der Seite herein
+  stop(),                               // Screenwechsel: Shake-Timer/Animationen abbrechen, offenes
+                                        // shake-Promise resolved sofort, onBeat danach nie mehr
 }
 handIcon(move) → SVGElement             // quadratische viewBox, Manschette in --icon-accent
 ```
