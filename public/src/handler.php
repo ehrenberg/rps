@@ -26,6 +26,7 @@ function rps_handle(PDO $pdo, array $in, int $now, ?callable $chance = null): ar
         'info' => rps_action_info($pdo, $in, $now),
         'join' => rps_action_join($pdo, $in, $now),
         'state' => rps_action_state($pdo, $in, $now),
+        'watch' => rps_action_watch($pdo, $in, $now),
         'commit' => rps_action_simple($pdo, $in, $now, static fn(array $r, string $id): array =>
             rps_room_commit($r, $id, rps_valid_hash($in['hash'] ?? null), $now)),
         'reveal' => rps_action_simple($pdo, $in, $now, static fn(array $r, string $id): array =>
@@ -130,18 +131,59 @@ function rps_action_state(PDO $pdo, array $in, int $now): array
     $token = rps_valid_token($in['token'] ?? null);
     $since = isset($in['since']) && is_int($in['since']) ? $in['since'] : null;
 
-    $loaded = rps_db_load_room($pdo, $code, $now) ?? throw rps_room_not_found();
-    $id = rps_room_require_player($loaded['room'], $token);
-    [$room, $version] = [$loaded['room'], $loaded['version']];
-    if (rps_state_update($room, $id, $now) !== $room) {
-        [$room, $version] = rps_with_room($pdo, $code, $now, static function (array $r) use ($id, $now): array {
-            $r = rps_state_update($r, $id, $now);
-            return [$r, static fn(int $nv): array => [$r, $nv]];
-        });
-    }
+    [$room, $version, $id] = rps_room_present($pdo, $code, $token, $now);
     return $since === $version
         ? rps_room_unchanged_view($room, $version, $now)
         : rps_room_view($room, $code, $version, $id, $now);
+}
+
+/**
+ * Anwesenheit eines Spielers (`state`, `watch`): liest ohne Sperre; schreibt nur in eigener kurzer
+ * Transaktion, wenn Fristen fällig sind oder `seen` veraltet ist.
+ * @return array{0:array,1:int,2:string,3:int} [room, version, id, updated]
+ */
+function rps_room_present(PDO $pdo, string $code, string $token, int $now): array
+{
+    $loaded = rps_db_load_room($pdo, $code, $now) ?? throw rps_room_not_found();
+    $id = rps_room_require_player($loaded['room'], $token);
+    [$room, $version, $updated] = [$loaded['room'], $loaded['version'], $loaded['updated']];
+    if (rps_state_update($room, $id, $now) !== $room) {
+        [$room, $version, $saved] = rps_with_room($pdo, $code, $now, static function (array $r) use ($id, $now): array {
+            $new = rps_state_update($r, $id, $now);
+            return [$new, static fn(int $nv): array => [$new, $nv, $new !== $r]];
+        });
+        $updated = $saved ? $now : $updated;
+    }
+    return [$room, $version, $id, $updated];
+}
+
+/**
+ * `watch`: Kurzfassung mehrerer Räume für „Meine Spiele“. Jeder Raum für sich (eigene Transaktion);
+ * ein ungültiger oder fehlender Eintrag betrifft nur sich selbst. Nur Strukturfehler → 400.
+ */
+function rps_action_watch(PDO $pdo, array $in, int $now): array
+{
+    $rooms = [];
+    foreach (rps_valid_watch_list($in['rooms'] ?? null) as $entry) {
+        $rooms[$entry['code']] = rps_watch_room($pdo, $entry, $now);
+    }
+    return ['now' => $now, 'rooms' => (object) $rooms];
+}
+
+/** @param array{code:string,token:mixed,since:?int} $entry */
+function rps_watch_room(PDO $pdo, array $entry, int $now): array
+{
+    try {
+        $code = rps_valid_code($entry['code']);
+        $token = rps_valid_token($entry['token']);
+        [$room, $version, $id, $updated] = rps_room_present($pdo, $code, $token, $now);
+    } catch (RpsError $e) {
+        return ['gone' => true, 'reason' => $e->status() === 404 ? 'notFound' : 'forbidden'];
+    } catch (JsonException) {
+        error_log('rps api: watch – Raumdaten nicht lesbar');
+        return ['gone' => true, 'reason' => 'notFound'];
+    }
+    return rps_room_summary($room, $version, $id, $updated, $entry['since']);
 }
 
 /** Was `state` am Raum ändert: Fristen und ggf. seen. */

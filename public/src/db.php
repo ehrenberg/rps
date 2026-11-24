@@ -86,16 +86,24 @@ function rps_db_transaction(PDO $pdo, callable $fn): mixed
     }
 }
 
-/** Lädt einen Raum; abgelaufene Räume (älter als 24 h) gelten als nicht vorhanden. @return array{room:array,version:int}|null */
+/**
+ * Lädt einen Raum; abgelaufene Räume (älter als 24 h) gelten als nicht vorhanden.
+ * `updated` = Zeit der letzten Speicherung (auch reine seen-Updates).
+ * @return array{room:array,version:int,updated:int}|null
+ */
 function rps_db_load_room(PDO $pdo, string $code, int $now): ?array
 {
-    $st = $pdo->prepare('SELECT data, version FROM rooms WHERE code = ? AND created >= ?');
+    $st = $pdo->prepare('SELECT data, version, updated FROM rooms WHERE code = ? AND created >= ?');
     $st->execute([$code, $now - RPS_ROOM_TTL]);
     $row = $st->fetch();
     if ($row === false) {
         return null;
     }
-    return ['room' => json_decode($row['data'], true, 64, JSON_THROW_ON_ERROR), 'version' => (int) $row['version']];
+    return [
+        'room' => json_decode($row['data'], true, 64, JSON_THROW_ON_ERROR),
+        'version' => (int) $row['version'],
+        'updated' => (int) $row['updated'],
+    ];
 }
 
 /** Legt einen Raum an. false, wenn der Code schon vergeben ist. */
