@@ -46,7 +46,7 @@ test('countersOf / targetWins / isValidMove', () => {
 
 test('REACTIONS entsprechen genau der PHP-Whitelist (validate.php)', () => {
   const php = readFileSync(new URL('../../public/src/validate.php', import.meta.url), 'utf8');
-  const line = php.match(/const RPS_EMOJIS = \[(.*?)\];/);
+  const line = php.match(/const RPS_EMOJIS\s*=\s*\[(.*?)\];/);
   assert.ok(line, 'RPS_EMOJIS in validate.php gefunden');
   const phpList = [...line[1].matchAll(/'([^']+)'/g)].map((m) => m[1]);
   assert.deepEqual([...REACTIONS], phpList);

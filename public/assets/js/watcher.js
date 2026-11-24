@@ -36,7 +36,7 @@ export function detectEvents(prev, next, { notified = [] } = {}) {
     add('match', `match:${next.myMatch}`, opp ? `Dein Turnier-Match gegen ${opp} beginnt!` : 'Dein Turnier-Match beginnt!', 'Dein Match beginnt!');
   }
   if (next.rematchWanted && !prev.rematchWanted) {
-    add('rematch', `rematch:${next.myMatch ?? ''}`, `${opp ?? 'Dein Gegner'} will eine Revanche!`, 'Revanche?');
+    add('rematch', `rematch:${next.version ?? ''}`, `${opp ?? 'Dein Gegner'} will eine Revanche!`, 'Revanche?');
   }
   if (next.needsMove && !prev.needsMove) {
     add('move', `move:${next.myMatch ?? ''}`, opp ? `Du bist am Zug gegen ${opp}!` : 'Du bist am Zug!', 'Du bist dran!');
@@ -170,7 +170,7 @@ export function createWatcher({
       running = true;
       unsubscribe = store.subscribe(wake);
       events?.addEventListener?.('visibilitychange', onVisibility);
-      schedule(0);
+      tick();
     },
     stop() {
       running = false;

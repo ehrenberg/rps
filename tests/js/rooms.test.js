@@ -174,13 +174,13 @@ test('summaryFromState: Duell-Lobby, laufend (am Zug), Revanche', () => {
   assert.deepEqual({ status: s0.status, opponent: s0.opponent, needsMove: s0.needsMove, isHost: s0.isHost, players: s0.players, version: s0.version },
     { status: 'lobby', opponent: null, needsMove: false, isHost: true, players: 1, version: 2 });
   const m1 = { id: 'm1', p: ['p_a', 'p_b'], score: [0, 0], cur: { committed: [false, true] }, history: [], winner: null, end: null };
-  const run = { ...lobby, version: 3, status: 'running', players: [P('p_a', 'Anna'), P('p_b', 'Ben')], matches: { m1 }, current: 'm1' };
+  const run = { ...lobby, version: 3, status: 'running', players: [P('p_a', 'Anna'), P('p_b', 'Ben')], matches: { m1 }, current: 'm1', myMatch: 'm1' };
   const s1 = summaryFromState(run, 'p_a');
   assert.equal(s1.opponent, 'Ben');
   assert.equal(s1.needsMove, true);
   assert.equal(s1.myMatch, 'm1');
   assert.equal(summaryFromState(run, 'p_b').needsMove, false, 'B hat schon gewählt');
-  const over = { ...run, matches: { m1: { ...m1, winner: 1, end: 'score' } }, rematch: ['p_b'] };
+  const over = { ...run, myMatch: null, matches: { m1: { ...m1, winner: 1, end: 'score' } }, rematch: ['p_b'] };
   const s2 = summaryFromState(over, 'p_a');
   assert.equal(s2.rematchWanted, true);
   assert.equal(s2.needsMove, false);

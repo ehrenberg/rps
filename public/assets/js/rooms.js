@@ -209,14 +209,23 @@ export function createRoomStore({ storage = defaultStorage(), now = () => Date.n
   return store;
 }
 
+let shared = null;
+/** Gemeinsamer Store der App (localStorage, storage-Ereignis von window) – alle Screens teilen ihn,
+ *  damit Badge und Liste auch bei Änderungen im selben Tab sofort mitbekommen. */
+export function sharedRoomStore() {
+  shared ??= createRoomStore();
+  return shared;
+}
+
 /**
  * Raum-Sitzung für ui/room.js & Co. (gleiche Schnittstelle wie früher, jetzt über den Raum-Speicher).
  * storage: Speicher (Standard localStorage) oder ein fertiger Store aus createRoomStore().
  */
 export function createRoomSession(storage = undefined, opts = {}) {
-  const store = storage && typeof storage.put === 'function' && typeof storage.list === 'function'
-    ? storage
-    : createRoomStore({ ...opts, storage: storage === undefined ? defaultStorage() : storage, events: null });
+  let store;
+  if (storage === undefined) store = sharedRoomStore();
+  else if (storage && typeof storage.put === 'function' && typeof storage.list === 'function') store = storage;
+  else store = createRoomStore({ ...opts, storage, events: null });
   return {
     store,
     /** { token, me } oder null */
@@ -252,13 +261,13 @@ export function summaryFromState(state, me) {
   const nameOf = (id) => players.find((p) => p.id === id)?.name ?? null;
   const self = players.find((p) => p.id === me);
   const active = players.filter((p) => !p.spectator && !p.left);
-  const matchId = state.type === 'duel' ? state.current : state.myMatch;
-  const m = matchId ? state.matches?.[matchId] : null;
+  const myMatch = state.myMatch ?? null; // wie beim Server: nur spielbare Matches
+  const m = myMatch ? state.matches?.[myMatch] : null;
   const myIdx = m?.p ? m.p.indexOf(me) : -1;
   let opponent = null;
   if (state.type === 'duel') opponent = players.find((p) => p.id !== me && !p.spectator)?.name ?? null;
   else if (m && myIdx >= 0) opponent = nameOf(m.p[1 - myIdx]);
-  const running = Boolean(m && myIdx >= 0 && !isOver(m) && m.p.every(Boolean));
+  const cur = state.type === 'duel' && state.current ? state.matches?.[state.current] : null;
   const rematch = state.rematch ?? [];
   return {
     version: state.version ?? null,
@@ -270,11 +279,11 @@ export function summaryFromState(state, me) {
     isHost: state.host === me,
     players: active.length,
     spectator: Boolean(self?.spectator),
-    left: Boolean(self?.left),
+    left: false,
     opponent,
-    myMatch: state.type === 'duel' ? (state.current ?? null) : (state.myMatch ?? null),
-    needsMove: running && state.status === 'running' && m.cur?.committed?.[myIdx] === false,
-    rematchWanted: state.type === 'duel' && Boolean(m && isOver(m)) && rematch.some((id) => id !== me) && !rematch.includes(me),
+    myMatch,
+    needsMove: Boolean(m && myIdx >= 0 && m.cur?.committed?.[myIdx] === false),
+    rematchWanted: state.status === 'running' && Boolean(cur && isOver(cur)) && rematch.length > 0 && !rematch.includes(me),
     champion: state.champion ? nameOf(state.champion) : null,
   };
 }
