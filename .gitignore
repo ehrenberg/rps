@@ -4,8 +4,11 @@ public/data/*
 !public/data/index.html
 
 # Dev
-node_modules/
+node_modules
 .DS_Store
 *.log
 .env
 .claude/settings.local.json
+
+# Upload-Paket (npm run dist)
+dist/
