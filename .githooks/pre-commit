@@ -1,15 +1,23 @@
 #!/usr/bin/env bash
 # Pre-Commit: Secrets-Scan (gitleaks) + PHP-Lint auf 8.1 + JS-Unit-Tests – alles über Docker.
+# Funktioniert auch in Git-Worktrees: $HOME wird an gleicher Stelle eingebunden, damit der
+# Verweis .git → <haupt-repo>/.git/worktrees/… im Container auflösbar ist.
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
-export UID GID="$(id -g)"
-dc() { docker compose --profile tools run --rm -T "$@"; }
 
-dc gitleaks git --pre-commit --staged --redact --no-banner --config .gitleaks.toml
+COMMON_DIR="$(cd "$(git rev-parse --git-common-dir)" && pwd)"
+dockerx() {
+  docker run --rm -u "$(id -u):$(id -g)" -v "$HOME:$HOME" -v "$COMMON_DIR:$COMMON_DIR" -w "$PWD" "$@"
+}
+
+out="$(dockerx zricethezav/gitleaks:latest git --pre-commit --staged --redact --no-banner --config .gitleaks.toml . 2>&1)" || { echo "$out" >&2; echo "✘ gitleaks: Secrets gefunden – Commit abgebrochen." >&2; exit 1; }
+if grep -qiE 'not a git repository|fatal:' <<<"$out"; then
+  echo "$out" >&2; echo "✘ gitleaks konnte das Repo nicht lesen – Commit abgebrochen." >&2; exit 1
+fi
 
 mapfile -t php_files < <(git diff --cached --name-only --diff-filter=ACM -- '*.php')
 if ((${#php_files[@]})); then
-  dc php sh -c 'for f; do php -l "$f" >/dev/null || exit 1; done' _ "${php_files[@]}"
+  dockerx php:8.1-cli sh -c 'for f; do php -l "$f" >/dev/null || exit 1; done' _ "${php_files[@]}"
 fi
 
 if git diff --cached --name-only --diff-filter=ACM | grep -qE '\.(js|mjs)$'; then
