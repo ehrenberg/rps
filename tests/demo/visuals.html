@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>RPS – Grafik &amp; Sound Demo</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="../../public/assets/css/fx.css">
+  <link rel="stylesheet" href="visuals.css">
+</head>
+<body>
+  <canvas class="fx-canvas" id="fx"></canvas>
+  <main id="stage">
+    <header>
+      <h1>Grafik &amp; Sound</h1>
+      <label><input type="checkbox" id="reduced"> Animationen reduziert</label>
+      <label><input type="checkbox" id="sound" checked> Ton</label>
+    </header>
+
+    <section>
+      <h2>Arena</h2>
+      <div class="arena" id="arena">
+        <div class="arena__slot" id="slot-left"></div>
+        <div class="arena__slot" id="slot-right"></div>
+      </div>
+      <div class="row" id="arena-controls">
+        <button data-act="round">Runde spielen</button>
+        <button data-act="shake">shake()</button>
+        <button data-act="win">win / lose</button>
+        <button data-act="lose">lose / win</button>
+        <button data-act="draw">draw</button>
+        <button data-act="idle">idle</button>
+        <button data-act="enter">enter()</button>
+      </div>
+      <div class="row" id="move-buttons"></div>
+    </section>
+
+    <section>
+      <h2>Alle Hände</h2>
+      <div class="gallery" id="gallery"></div>
+    </section>
+
+    <section>
+      <h2>Icons</h2>
+      <div class="row" id="icons"></div>
+      <div class="row icons-small" id="icons-small"></div>
+    </section>
+
+    <section>
+      <h2>Effekte</h2>
+      <div class="row" id="fx-buttons"></div>
+      <div class="row" id="emoji-buttons"></div>
+      <p class="fps">FPS: <output id="fps">–</output></p>
+    </section>
+
+    <section>
+      <h2>Sounds</h2>
+      <div class="row" id="sound-buttons"></div>
+    </section>
+  </main>
+  <script type="module" src="visuals.js"></script>
+</body>
+</html>

@@ -1,0 +1,66 @@
+:root {
+  color-scheme: dark;
+  --bg: #120b2e;
+  --text: #f3eeff;
+  --card: rgb(255 255 255 / 0.06);
+  --card-border: rgb(255 255 255 / 0.12);
+  --accent-left: #3ad1ff;
+  --accent-right: #ff5d8f;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  font: 16px/1.4 system-ui, sans-serif;
+  color: var(--text);
+  background:
+    radial-gradient(60% 50% at 15% 10%, rgb(110 60 255 / 0.45), transparent 70%),
+    radial-gradient(50% 40% at 85% 20%, rgb(255 70 160 / 0.3), transparent 70%),
+    radial-gradient(70% 60% at 50% 100%, rgb(40 160 255 / 0.3), transparent 70%),
+    var(--bg);
+  background-attachment: fixed;
+}
+
+main { max-width: 1100px; margin: 0 auto; padding: 16px; }
+header { display: flex; flex-wrap: wrap; gap: 16px; align-items: center; }
+h1 { margin: 0 auto 0 0; font-size: 1.6rem; }
+h2 { font-size: 1.1rem; opacity: 0.8; margin: 24px 0 8px; }
+
+section {
+  background: var(--card);
+  border: 1px solid var(--card-border);
+  border-radius: 20px;
+  padding: 8px 16px 16px;
+  margin-top: 16px;
+}
+
+.row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; align-items: center; }
+
+button {
+  font: inherit;
+  color: var(--text);
+  background: rgb(255 255 255 / 0.1);
+  border: 1px solid var(--card-border);
+  border-radius: 12px;
+  padding: 6px 12px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+button:hover { background: rgb(255 255 255 / 0.18); }
+button .hand-icon { width: 2.4rem; height: 2.4rem; }
+
+.arena { display: grid; grid-template-columns: 1fr 1fr; gap: 0; overflow: hidden; padding: 24px 0; }
+.arena__slot { aspect-ratio: 400 / 260; }
+
+.gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+.gallery figure { margin: 0; text-align: center; }
+.gallery .pair { display: grid; grid-template-columns: 1fr 1fr; }
+.gallery figcaption { opacity: 0.7; font-size: 0.9rem; }
+
+#icons .hand-icon { width: 64px; height: 64px; }
+.icons-small .hand-icon { width: 40px; height: 40px; }
+.fps { opacity: 0.8; }

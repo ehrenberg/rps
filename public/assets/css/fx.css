@@ -1,0 +1,125 @@
+/* Hände, Effekt-Ebenen, Emoji-Reaktionen. Gehört zu hands.js / fx.js.
+   Einbinden: <link rel="stylesheet" href="assets/css/fx.css"> oder @import url("fx.css"); in app.css.
+   Farben über Custom Properties (alle mit Rückfallwert):
+   --hand-skin, --hand-skin-shade, --hand-outline, --accent-left, --accent-right */
+
+:root {
+  --fx-hand-shadow: drop-shadow(0 0.6rem 0.7rem rgb(0 0 0 / 0.38));
+  --fx-glow-size: 70%;
+  --fx-emoji-size: clamp(2.2rem, 7vw, 3.4rem);
+  --fx-layer-z: 60;
+}
+
+/* ---------- Große Hand ---------- */
+
+.hand {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  aspect-ratio: 400 / 260;
+  pointer-events: none;
+  user-select: none;
+}
+
+.hand__flip,
+.hand__rig,
+.hand__pop {
+  position: absolute;
+  inset: 0;
+}
+
+.hand--right .hand__flip { transform: scaleX(-1); }
+
+/* Drehpunkt: „Ellbogen“ links außerhalb, damit die Faust wie ein Arm pumpt. */
+.hand__rig {
+  transform-origin: -10% 55%;
+  will-change: transform;
+}
+
+.hand__pop { transform-origin: 30% 55%; }
+
+.hand-svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  filter: var(--fx-hand-shadow);
+  transition: filter 0.6s ease;
+}
+
+.hand__glow {
+  position: absolute;
+  left: 45%;
+  top: 50%;
+  width: var(--fx-glow-size);
+  aspect-ratio: 1;
+  translate: -50% -50%;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, var(--hand-glow, rgb(255 230 140 / 0.75)), transparent);
+  opacity: 0;
+  transition: opacity 0.4s ease;
+}
+
+.hand--left  { --hand-glow: color-mix(in srgb, var(--accent-left, #3ad1ff) 70%, white); }
+.hand--right { --hand-glow: color-mix(in srgb, var(--accent-right, #ff5d8f) 70%, white); }
+
+.hand--win .hand__glow {
+  opacity: 0.85;
+  animation: fx-glow-pulse 1.4s ease-in-out infinite;
+}
+
+.hand--lose .hand-svg {
+  filter: var(--fx-hand-shadow) grayscale(0.65) brightness(0.82);
+}
+
+@keyframes fx-glow-pulse {
+  0%, 100% { scale: 0.92; opacity: 0.6; }
+  50%      { scale: 1.08; opacity: 0.95; }
+}
+
+/* ---------- Icons ---------- */
+
+.hand-icon {
+  display: inline-block;
+  width: 3.5rem;
+  height: 3.5rem;
+  overflow: visible;
+  filter: drop-shadow(0 0.15rem 0.2rem rgb(0 0 0 / 0.3));
+}
+
+/* ---------- Effekt-Ebenen ---------- */
+
+.fx-canvas {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: var(--fx-layer-z);
+}
+
+.fx-emoji-layer {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: calc(var(--fx-layer-z) + 1);
+}
+
+.fx-emoji {
+  position: absolute;
+  font-size: var(--fx-emoji-size);
+  line-height: 1;
+  translate: -50% -50%;
+  will-change: transform, opacity;
+  filter: drop-shadow(0 0.2rem 0.3rem rgb(0 0 0 / 0.35));
+}
+
+/* ---------- Reduzierte Bewegung ---------- */
+
+@media (prefers-reduced-motion: reduce) {
+  .hand--win .hand__glow { animation: none; }
+}
+
+:root[data-reduced-fx="1"] .hand--win .hand__glow { animation: none; }
