@@ -8,9 +8,16 @@ export const POLL_MS = Object.freeze({ match: 1000, idle: 1000, end: 5000, hidde
 export const BACKOFF_MAX_MS = 10_000;
 export const RECONNECT_TEXT = 'Verbindung wird wiederhergestellt …';
 const NETWORK_ERROR_TEXT = 'Keine Verbindung zum Server.';
-const HTTP_SERVER_ERROR = 500;
+const TIMEOUT_TEXT = 'Zeitüberschreitung – der Server antwortet nicht.';
+/** Ohne Antwort nach dieser Zeit wird ein Request abgebrochen (sonst blockiert er den Poller). */
+export const API_TIMEOUT_MS = 8000;
+
+/** HTTP-Statuscodes, auf die der Client reagiert. 0 = Netzwerkfehler/Timeout. */
+export const HTTP = Object.freeze({
+  NETWORK: 0, FORBIDDEN: 403, NOT_FOUND: 404, CONFLICT: 409, TOO_MANY: 429, SERVER_ERROR: 500,
+});
 /** Statuscodes, bei denen weiteres Pollen sinnlos ist (Token unbekannt, Raum weg). */
-export const FATAL_STATUS = Object.freeze([403, 404]);
+export const FATAL_STATUS = Object.freeze([HTTP.FORBIDDEN, HTTP.NOT_FOUND]);
 
 export class ApiError extends Error {
   /** @param {string} message deutscher, anzeigbarer Text  @param {number} status HTTP-Status (0 = Netzwerk) */
@@ -22,25 +29,44 @@ export class ApiError extends Error {
 
   /** Netzwerk- oder Serverfehler → später erneut versuchen. */
   get retryable() {
-    return this.status === 0 || this.status >= HTTP_SERVER_ERROR;
+    return this.status === HTTP.NETWORK || this.status >= HTTP.SERVER_ERROR;
   }
 }
 
-/** POST api.php mit JSON; wirft ApiError mit deutschem Text. */
-export async function api(action, params = {}, { fetchImpl = globalThis.fetch, url = API_URL } = {}) {
-  let res;
-  try {
-    res = await fetchImpl(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action, ...params }),
-      cache: 'no-store',
-    });
-  } catch {
-    throw new ApiError(NETWORK_ERROR_TEXT, 0);
+/** Fehler beim Verarbeiten eines Zustands (onState hat geworfen) – kein Netzwerkproblem. */
+export class StateHandlerError extends Error {
+  constructor(cause) {
+    super('Die Anzeige konnte nicht aktualisiert werden – neuer Versuch …', { cause });
+    this.name = 'StateHandlerError';
   }
+}
+
+/** POST api.php mit JSON; wirft ApiError mit deutschem Text (auch bei Timeout). */
+export async function api(action, params = {}, { fetchImpl = globalThis.fetch, url = API_URL, timeoutMs = API_TIMEOUT_MS } = {}) {
+  const controller = new AbortController();
+  let timedOut = false;
+  const timer = setTimeout(() => { timedOut = true; controller.abort(); }, timeoutMs);
+  let res;
   let data = null;
-  try { data = await res.json(); } catch { data = null; }
+  try {
+    try {
+      res = await fetchImpl(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action, ...params }),
+        cache: 'no-store',
+        signal: controller.signal,
+      });
+    } catch {
+      throw new ApiError(timedOut ? TIMEOUT_TEXT : NETWORK_ERROR_TEXT, HTTP.NETWORK);
+    }
+    try { data = await res.json(); } catch {
+      if (timedOut) throw new ApiError(TIMEOUT_TEXT, HTTP.NETWORK);
+      data = null;
+    }
+  } finally {
+    clearTimeout(timer);
+  }
   if (!res.ok) {
     throw new ApiError(data?.error ?? `Serverfehler (${res.status}).`, res.status);
   }
@@ -77,6 +103,7 @@ export function createPoller({
   let inFlight = false;
   let again = false;
   let failures = 0;
+  let stateFailures = 0; // onState hat geworfen (Backoff, damit kein Fehler-Sturm entsteht)
   let connected = true;
 
   const schedule = (ms) => {
@@ -103,8 +130,17 @@ export function createPoller({
       failures = 0;
       setConnected(true);
       if (!res.unchanged) {
-        version = res.version;
-        onState(res);
+        // Version erst nach erfolgreicher Verarbeitung übernehmen: wirft onState, kommt der
+        // Zustand beim nächsten Poll erneut (sonst bliebe die Anzeige auf altem Stand stehen).
+        try {
+          onState(res);
+          version = res.version;
+          stateFailures = 0;
+        } catch (err) {
+          stateFailures += 1;
+          console.error(err);
+          onError(new StateHandlerError(err), { failures: stateFailures, fatal: false });
+        }
       }
       const online = res.unchanged
         ? res.online
@@ -122,7 +158,8 @@ export function createPoller({
     }
     if (!running) return;
     if (again) { again = false; schedule(0); return; }
-    schedule(failures ? backoffDelay(failures) : pollInterval(mode, isHidden()));
+    const errors = Math.max(failures, stateFailures);
+    schedule(errors ? backoffDelay(errors) : pollInterval(mode, isHidden()));
   }
 
   return {

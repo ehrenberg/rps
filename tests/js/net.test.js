@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   api, ApiError, createPoller, backoffDelay, pollInterval, POLL_MS, BACKOFF_MAX_MS, createRoomSession, SESSION_KEYS,
+  API_TIMEOUT_MS, HTTP, FATAL_STATUS, StateHandlerError,
 } from '../../public/assets/js/net.js';
 
 const jsonResponse = (status, body) => ({ ok: status < 400, status, json: async () => body });
@@ -165,4 +166,77 @@ test('Raum-Sitzung: Token/ID, Pending-Zug, gezählte Matches, clear', () => {
   assert.equal(s.get('abc234'), null);
   assert.equal(s.getPending('abc234'), null);
   assert.equal(st.m.size, 0);
+});
+
+test('api: hängender Request bricht nach Timeout ab → Status 0, wiederholbar', async () => {
+  let aborted = false;
+  const fetchImpl = (url, init) => new Promise((resolve, reject) => {
+    init.signal.addEventListener('abort', () => { aborted = true; reject(new DOMException('abgebrochen', 'AbortError')); });
+  });
+  await assert.rejects(api('state', {}, { fetchImpl, timeoutMs: 5 }),
+    (err) => err instanceof ApiError && err.status === 0 && err.retryable && /Zeitüberschreitung/.test(err.message));
+  assert.equal(aborted, true);
+  assert.ok(API_TIMEOUT_MS >= 5000 && API_TIMEOUT_MS <= 15000);
+});
+
+test('HTTP-Statuskonstanten zentral', () => {
+  assert.equal(HTTP.FORBIDDEN, 403);
+  assert.equal(HTTP.NOT_FOUND, 404);
+  assert.equal(HTTP.CONFLICT, 409);
+  assert.equal(HTTP.TOO_MANY, 429);
+  assert.deepEqual([...FATAL_STATUS], [HTTP.FORBIDDEN, HTTP.NOT_FOUND]);
+});
+
+test('Poller: hängender fetch blockiert nicht – Timeout zählt als Netzfehler, danach geht es weiter', async () => {
+  let hang = true;
+  const fetchImpl = (url, init) => new Promise((resolve, reject) => {
+    if (!hang) { resolve(jsonResponse(200, { version: 1, players: [] })); return; }
+    init.signal.addEventListener('abort', () => reject(new DOMException('abgebrochen', 'AbortError')));
+  });
+  const apiFn = (action, params) => api(action, params, { fetchImpl, timeoutMs: 5 });
+  const timers = fakeTimers();
+  const errors = []; const states = [];
+  const poller = createPoller({ code: 'abc234', token: 't', apiFn, timers, isHidden: () => false,
+    onState: (s) => states.push(s), onError: (e, info) => errors.push([e.status, info]) });
+  poller.start();
+  await new Promise((r) => setTimeout(r, 30));
+  assert.deepEqual(errors.map(([status, info]) => [status, info.failures, info.fatal]), [[0, 1, false]]);
+  assert.equal(timers.pending.ms, 1000, 'Backoff geplant statt hängen');
+  hang = false;
+  await timers.run();
+  await flush();
+  assert.equal(states.length, 1);
+  poller.stop();
+});
+
+test('Poller: Fehler in onState → eigener Fehlertyp, Version nicht übernommen, Zustand wird erneut verarbeitet', async () => {
+  const calls = [];
+  const apiFn = async (action, params) => { calls.push(params); return { version: 7, players: [{ id: 'p_a', online: true }] }; };
+  const timers = fakeTimers();
+  const errors = []; const conn = [];
+  let throwOnce = true;
+  const states = [];
+  const origError = console.error;
+  const logged = [];
+  console.error = (...a) => logged.push(a);
+  try {
+    const poller = createPoller({ code: 'abc234', token: 't', apiFn, timers, isHidden: () => false,
+      onState: (s) => { if (throwOnce) { throwOnce = false; throw new TypeError('kaputt'); } states.push(s); },
+      onError: (e, info) => errors.push([e, info]), onConnection: (ok) => conn.push(ok) });
+    poller.start();
+    await flush();
+    assert.equal(errors.length, 1);
+    assert.ok(errors[0][0] instanceof StateHandlerError);
+    assert.equal(errors[0][1].fatal, false);
+    assert.equal(logged.length, 1, 'console.error für Entwickler');
+    assert.equal(poller.version, null, 'Version erst nach erfolgreicher Verarbeitung');
+    assert.deepEqual(conn, [], 'kein Verbindungsproblem');
+    await timers.run();
+    assert.equal(calls[1].since, undefined, 'voller Zustand wird erneut geholt');
+    assert.equal(states.length, 1);
+    assert.equal(poller.version, 7);
+    poller.stop();
+  } finally {
+    console.error = origError;
+  }
 });
