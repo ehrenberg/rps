@@ -18,6 +18,13 @@ async function copyText(text, input) {
   }
 }
 
+/** QR-Code mit Alternativtext; der Link selbst steht im Feld darüber. */
+function qrImage(url) {
+  const svg = qrSvg(url);
+  svg.setAttribute('aria-label', `QR-Code mit dem Einladungslink ${url}`);
+  return svg;
+}
+
 /** @returns {HTMLElement} */
 export function shareCard({ code, title, text }) {
   const url = roomUrl(code);
@@ -36,9 +43,10 @@ export function shareCard({ code, title, text }) {
     }, icon('share'), 'Teilen')
     : null;
   return h('div', { class: 'share glass' },
-    h('div', { class: 'share__code', 'aria-label': `Raumcode ${code.split('').join(' ')}` },
+    h('p', { class: 'share__code' },
+      h('span', { class: 'visually-hidden' }, `Raumcode ${code.split('').join(' ')}`),
       code.split('').map((c) => h('span', { 'aria-hidden': 'true' }, c))),
     h('div', { class: 'share__row' }, input),
     h('div', { class: 'share__actions' }, copy, share),
-    h('figure', { class: 'share__qr' }, qrSvg(url), h('figcaption', {}, 'Mit dem Handy scannen')));
+    h('figure', { class: 'share__qr' }, qrImage(url), h('figcaption', {}, 'Mit dem Handy scannen')));
 }

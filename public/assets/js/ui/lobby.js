@@ -19,10 +19,10 @@ function waitingAnimation(text) {
 }
 
 /**
- * @param {{ state, me, code, onStart:()=>void, onLeave:()=>void }} o
+ * @param {{ state, me, code, onStart:()=>void, onLeave:()=>void, announce?:(text:string)=>void }} o
  * @returns {{ el, focus, update(state), dispose }}
  */
-export function lobbyView({ state: initial, me, code, onStart, onLeave }) {
+export function lobbyView({ state: initial, me, code, onStart, onLeave, announce = null }) {
   const isDuel = initial.type === 'duel';
   const { el, body, heading } = screenLayout({
     id: 'lobby',
@@ -40,8 +40,15 @@ export function lobbyView({ state: initial, me, code, onStart, onLeave }) {
   const leave = h('button', { type: 'button', class: 'btn btn--ghost', onclick: onLeave }, icon('door', { size: 18 }), 'Raum verlassen');
   body.append(...[status, share, isDuel ? null : listPanel, h('div', { class: 'lobby__footer' }, leave)].filter(Boolean));
 
+  let known = null; // Spieler-IDs für Beitritts-Ansagen
   function update(state) {
     const players = activePlayers(state);
+    // Start-Button wird neu gebaut: Fokus übernehmen statt an <body> zu verlieren.
+    const hadFocus = status.contains(document.activeElement);
+    if (known) {
+      for (const p of players) if (!known.has(p.id) && p.id !== me) announce?.(`${p.name} ist beigetreten.`);
+    }
+    known = new Set(players.map((p) => p.id));
     const isHost = state.host === me;
     if (isDuel) {
       replaceChildren(status, waitingAnimation('Warte auf deinen Gegner'),
@@ -49,8 +56,8 @@ export function lobbyView({ state: initial, me, code, onStart, onLeave }) {
       return;
     }
     replaceChildren(list, players.map((p) => h('li', { class: ['player-row', p.id === me && 'player-row--me'] },
-      h('span', { class: ['dot', p.online ? 'dot--on' : 'dot--off'], 'aria-label': p.online ? 'online' : 'offline' }),
-      h('span', { class: 'player-row__name' }, p.name),
+      h('span', { class: ['dot', p.online ? 'dot--on' : 'dot--off'], 'aria-hidden': 'true' }),
+      h('span', { class: 'player-row__name' }, p.name, h('span', { class: 'visually-hidden' }, p.online ? ' (online)' : ' (offline)')),
       p.id === state.host ? h('span', { class: 'player-row__tag', title: 'Host' }, icon('crown', { size: 16 }), 'Host') : null,
       p.id === me ? h('span', { class: 'player-row__tag player-row__tag--me' }, 'du') : null)));
     const count = h('p', { class: 'lobby__count' }, h('strong', {}, String(players.length)), ` / ${MAX_TOURNAMENT_PLAYERS} Spieler`);
@@ -63,6 +70,7 @@ export function lobbyView({ state: initial, me, code, onStart, onLeave }) {
       const host = (state.players ?? []).find((p) => p.id === state.host)?.name ?? 'Host';
       replaceChildren(status, count, waitingAnimation(`Warte auf ${host}`));
     }
+    if (hadFocus) (status.querySelector('button') ?? heading).focus({ preventScroll: true });
   }
   update(initial);
   return { el, focus: () => heading.focus({ preventScroll: true }), update, dispose() {} };

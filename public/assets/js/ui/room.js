@@ -86,7 +86,7 @@ export function render({ params, settings, announce, navigate }) {
   }
 
   function showLobby(state) {
-    const v = lobbyView({ state, me: creds.me, code, onStart: () => act('start'), onLeave: leaveRoom });
+    const v = lobbyView({ state, me: creds.me, code, onStart: () => act('start'), onLeave: leaveRoom, announce });
     show({ kind: 'lobby', ...v });
   }
 
@@ -97,6 +97,7 @@ export function render({ params, settings, announce, navigate }) {
       onRestart: () => act('start'),
       onPlay: () => { dismissedMatch = null; route(lastState); },
       onLeave: leaveRoom,
+      announce,
     });
     show({ kind: 'bracket', ...v });
   }
@@ -190,7 +191,7 @@ export function render({ params, settings, announce, navigate }) {
 
   function showInvite() {
     const v = inviteView({
-      code, settings,
+      code, settings, announce,
       onJoined: ({ token, me }) => {
         session.set(code, { token, me });
         creds = { token, me };
