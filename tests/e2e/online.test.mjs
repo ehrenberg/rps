@@ -3,7 +3,7 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  BASE_URL, MOBILE, DESKTOP, launchBrowser, newPlayer, createRoom, joinRoom, playOnlineMatch, enabledMove,
+  BASE_URL, MOBILE, DESKTOP, launchBrowser, newPlayer, createRoom, joinRoom, playOnlineMatch, enabledMove, reloadPage,
 } from './helpers.mjs';
 
 let browser;
@@ -40,7 +40,7 @@ test('Duell: 3 Matches mit Revanche und Serie, Reload behält Platz, Reaktionen 
   await A.page.click('.move-btn[data-move="rock"]');
   await committed;
   await B.page.waitForSelector('.player__status[data-state="ready"]', { timeout: MATCH_TIMEOUT });
-  await A.page.reload();
+  await reloadPage(A); // bricht ggf. einen offenen Poll ab – das ist gewollt
   await A.page.waitForSelector('.move-btn--chosen[data-move="rock"]', { timeout: MATCH_TIMEOUT });
   assert.equal(await A.page.$('#invite-name'), null, 'keine erneute Namensabfrage');
   await B.page.click('.move-btn[data-move="scissors"]');
@@ -55,7 +55,8 @@ test('Duell: 3 Matches mit Revanche und Serie, Reload behält Platz, Reaktionen 
   for (const [i, winner] of [[2, WIN_B], [3, WIN_A]]) {
     await A.page.click('.overlay .btn--primary');
     await B.page.waitForFunction(() => document.querySelector('.overlay__status')?.textContent.includes('will Revanche'), null, { timeout: MATCH_TIMEOUT });
-    assert.match(await A.page.textContent('.overlay__status'), /Warte auf Ben/);
+    // A zeigt den eigenen Wunsch erst nach dem eigenen Poll – B kann ihn früher sehen
+    await A.page.waitForFunction(() => document.querySelector('.overlay__status')?.textContent.includes('Warte auf Ben'), null, { timeout: MATCH_TIMEOUT });
     await B.page.click('.overlay .btn--primary');
     await Promise.all([A.page, B.page].map((p) => p.waitForSelector('.overlay', { state: 'detached', timeout: MATCH_TIMEOUT })));
     await playOnlineMatch(A.page, B.page, winner);
