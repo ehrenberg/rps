@@ -1,6 +1,7 @@
 // Arena-Screen: verbindet einen Gegner-Adapter (Computer oder Online) mit Controller und Ansicht.
 import { createArenaView } from './arena-view.js';
-import { createArenaController, moveForKey } from '../arena.js';
+import { createArenaController } from '../arena.js';
+import { moveForKey } from '../move-keys.js';
 import { createCpuOpponent } from '../cpu-opponent.js';
 import { AI_LEVELS } from '../ai.js';
 import { VARIANT_NAMES } from '../rules.js';
