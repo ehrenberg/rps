@@ -72,8 +72,9 @@ function content(onReset) {
           const v = { w: num(g.w), l: num(g.l), d: num(g.d) };
           return h('li', { class: ['mode-row', v.w + v.l + v.d === 0 && 'mode-row--empty'] },
             h('span', { class: 'mode-row__label' }, label),
-            h('span', { class: 'mode-row__nums', 'aria-label': `${v.w} Siege, ${v.l} Niederlagen` },
-              h('b', { class: 'c-win' }, String(v.w)), ' : ', h('b', { class: 'c-lose' }, String(v.l))),
+            h('span', { class: 'mode-row__nums' },
+              h('span', { class: 'visually-hidden' }, `${v.w} Siege, ${v.l} Niederlagen`),
+              h('span', { 'aria-hidden': 'true' }, h('b', { class: 'c-win' }, String(v.w)), ' : ', h('b', { class: 'c-lose' }, String(v.l)))),
             wldBar(v));
         }),
         h('li', { class: 'mode-row' },

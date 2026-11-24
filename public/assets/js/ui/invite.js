@@ -25,10 +25,10 @@ function facts(info) {
 }
 
 /**
- * @param {{ code, settings, onJoined:(creds:{token,me,spectator})=>void }} o
+ * @param {{ code, settings, onJoined:(creds:{token,me,spectator})=>void, announce?:(text:string)=>void }} o
  * @returns {{ el, focus, dispose }}
  */
-export function inviteView({ code, settings, onJoined }) {
+export function inviteView({ code, settings, onJoined, announce = null }) {
   const { el, body, heading } = screenLayout({ id: 'invite', title: 'Einladung', subtitle: `Raum ${code}` });
   replaceChildren(body, h('div', { class: 'invite glass invite--loading' }, h('div', { class: 'spinner', 'aria-hidden': 'true' }), h('p', {}, 'Einladung wird geladen …')));
   let disposed = false;
@@ -53,6 +53,7 @@ export function inviteView({ code, settings, onJoined }) {
   function renderInfo(info) {
     const canJoin = info.joinable || info.spectate;
     heading.textContent = headline(info);
+    announce?.(headline(info)); // Überschrift hat schon den Fokus – neuer Text wird sonst nicht vorgelesen
     const nameField = nameInput({ settings, id: 'invite-name' });
     const btn = h('button', { type: 'button', class: 'btn btn--primary btn--lg btn--start', onclick: () => join(info, nameField, btn) },
       info.joinable ? (info.type === 'duel' ? 'Duell annehmen' : 'Mitmachen') : 'Zuschauen',
@@ -70,6 +71,7 @@ export function inviteView({ code, settings, onJoined }) {
 
   function renderMissing(message) {
     heading.textContent = 'Raum nicht gefunden';
+    announce?.(`Raum nicht gefunden. ${message}`);
     replaceChildren(body, h('div', { class: 'invite glass' },
       h('div', { class: 'invite__badge invite__badge--sad', 'aria-hidden': 'true' }, icon('link', { size: 44 })),
       h('p', {}, message),
