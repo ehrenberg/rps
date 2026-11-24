@@ -20,7 +20,7 @@ import * as audio from '../audio.js';
 
 export const title = 'Online-Raum';
 
-export function render({ params, settings, announce, navigate, notifier = null }) {
+export function render({ params, settings, announce, navigate }) {
   const { code } = params;
   const session = createRoomSession();
   const root = h('div', { class: 'room' });
@@ -116,7 +116,7 @@ export function render({ params, settings, announce, navigate, notifier = null }
   }
 
   function showLobby(state) {
-    const v = lobbyView({ state, me: creds.me, code, onStart: () => act('start'), onLeave: leaveRoom, announce, notifier });
+    const v = lobbyView({ state, me: creds.me, code, onStart: () => act('start'), onLeave: leaveRoom, announce });
     show({ kind: 'lobby', ...v });
   }
 

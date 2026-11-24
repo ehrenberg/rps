@@ -155,7 +155,8 @@ createTitleBlinker({ doc?, timers?, intervalMs? = 1000 }) → { alert(text) → 
 Ohne Service Worker; Icon `assets/img/icon-192.png`, `tag: rps-<code>` (zwei Tabs → eine Meldung).
 Klick fokussiert das Fenster und öffnet den Raum. Wirft der Konstruktor (Android ohne SW) → still.
 Tab-Titel wechselt nur bei verstecktem Tab zwischen normal und „(n) Ben ist da!“ und wird beim
-Sichtbarwerden zurückgesetzt. `main.js` verbindet alles: Ereignis → Toast mit „Zum Spiel“ (15 s,
+Sichtbarwerden zurückgesetzt. `main.js` lädt `watcher.js`/`notify.js` erst, sobald es offene Räume gibt
+(Startseite bleibt bei 22 Requests), und verbindet alles: Ereignis → Toast mit „Zum Spiel“ (15 s,
 Schließen-Knopf), `audio.play('join')`, Tab-Titel, System-Benachrichtigung.
 
 ## Arena-Controller
@@ -248,8 +249,9 @@ Warteschlange); `proof` = Gegner-Zug/Nonce/Hash aus `history`, damit der Control
 
 ### Screens (`ui/`)
 Jeder Screen exportiert `title` und `render(ctx) → { el, focus?, dispose? }`;
-`ctx = { settings, prefs, announce, navigate, params, rooms, notifier, watcher }`
-(`rooms` = gemeinsamer Raum-Store, `notifier` aus `notify.js`, `watcher` zum `poke()`). `main.js` wechselt per View Transition
+`ctx = { settings, prefs, announce, navigate, params, rooms, watcher }`
+(`rooms` = gemeinsamer Raum-Store, `watcher` = `{ poke() }`). Lobby und Einstellungen bauen sich ihren
+`createNotifier()` selbst (Zustand liegt nur in `rps.notify`/`rps.notifyHint`). `main.js` wechselt per View Transition
 und fokussiert danach die `h1`.
 
 ## Server-API: Antwort von `state`

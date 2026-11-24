@@ -7,6 +7,7 @@ import { handIcon } from '../hands.js';
 import { VARIANT_NAMES } from '../rules.js';
 import { singleFlight } from '../throttle.js';
 import { hrefFor } from '../router.js';
+import { createNotifier } from '../notify.js';
 
 export const MIN_TOURNAMENT_PLAYERS = 3;
 export const MAX_TOURNAMENT_PLAYERS = 16;
@@ -60,7 +61,7 @@ function notifyOffer(notifier, isDuel) {
  * @param {{ state, me, code, onStart:()=>Promise|void, onLeave:()=>void, announce?:(text:string)=>void, notifier? }} o
  * @returns {{ el, focus, update(state), dispose }}
  */
-export function lobbyView({ state: initial, me, code, onStart, onLeave, announce = null, notifier = null }) {
+export function lobbyView({ state: initial, me, code, onStart, onLeave, announce = null, notifier = createNotifier() }) {
   const isDuel = initial.type === 'duel';
   const { el, body, heading } = screenLayout({
     id: 'lobby',

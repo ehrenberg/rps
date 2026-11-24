@@ -8,8 +8,6 @@ import { prefersLessMotion } from './ui/dom.js';
 import { initToasts, showToast } from './ui/toast.js';
 import * as home from './ui/home.js';
 import { sharedRoomStore } from './rooms.js';
-import { createWatcher } from './watcher.js';
-import { createNotifier, createTitleBlinker } from './notify.js';
 
 const APP_TITLE = 'Schere Stein Papier';
 const LIVE_CLEAR_MS = 50;
@@ -59,9 +57,13 @@ const settings = createSettings();
 const reducedMotionQuery = globalThis.matchMedia?.('(prefers-reduced-motion: reduce)');
 
 // ─── „Meine Spiele“: offene Räume, Hintergrund-Wächter, Benachrichtigungen ───
+// Wächter + Benachrichtigungen werden erst geladen, wenn es offene Räume gibt (Startseite bleibt schlank).
 const rooms = sharedRoomStore();
-const notifier = createNotifier({ onOpen: (code) => navigate(hrefFor('room', { code })) });
-const blinker = createTitleBlinker();
+let watcher = null;
+let notifier = null;
+let blinker = null;
+let activeRoom = null;
+let servicesLoading = false;
 const roomToasts = new Map(); // code → offener Ereignis-Toast
 
 function closeRoomToast(code) {
@@ -77,10 +79,23 @@ function onRoomEvent(ev) {
     action: { label: 'Zum Spiel', onClick: () => navigate(hrefFor('room', { code: ev.code })) },
   }));
   audio.play('join');
-  blinker.alert(ev.title);
-  notifier.send({ title: ev.title, body: ev.text, code: ev.code });
+  blinker?.alert(ev.title);
+  notifier?.send({ title: ev.title, body: ev.text, code: ev.code });
 }
-const watcher = createWatcher({ store: rooms, onEvent: onRoomEvent });
+
+function startServices() {
+  if (servicesLoading || rooms.list().length === 0) return;
+  servicesLoading = true;
+  Promise.all([import('./watcher.js'), import('./notify.js')]).then(([w, n]) => {
+    notifier = n.createNotifier({ onOpen: (code) => navigate(hrefFor('room', { code })) });
+    blinker = n.createTitleBlinker();
+    watcher = w.createWatcher({ store: rooms, onEvent: onRoomEvent });
+    watcher.setActive(activeRoom);
+    watcher.start();
+  }, () => { servicesLoading = false; });
+}
+/** Für Screens: Wächter sofort abfragen lassen (falls schon geladen). */
+const watcherHandle = Object.freeze({ poke: () => watcher?.poke() });
 
 // ─── Einstellungen, die die ganze App betreffen ───
 const prefListeners = new Set();
@@ -151,7 +166,8 @@ function render() {
   lastHash = location.hash;
   // Den angezeigten Raum pollt der Raum-Screen selbst; der Wächter lässt ihn aus.
   const roomCode = route.name === 'room' ? route.params.code : null;
-  watcher.setActive(roomCode);
+  activeRoom = roomCode;
+  watcher?.setActive(roomCode);
   if (roomCode) closeRoomToast(roomCode);
   const seq = ++renderSeq;
   const cached = screens.get(route.name);
@@ -175,7 +191,7 @@ function render() {
 function show(route, screen) {
   current?.dispose?.();
   fx.clear?.();
-  const next = screen.render({ settings, prefs, announce, navigate, params: route.params, rooms, notifier, watcher });
+  const next = screen.render({ settings, prefs, announce, navigate, params: route.params, rooms, watcher: watcherHandle });
   current = next;
   document.title = route.name === 'home' ? APP_TITLE : `${screen.title} – ${APP_TITLE}`;
   root.dataset.route = route.name;
@@ -243,7 +259,8 @@ function init() {
   document.addEventListener('click', playClick);
   window.addEventListener('hashchange', render);
   render();
-  watcher.start();
+  startServices();
+  rooms.subscribe(startServices);
   prefetchScreens();
 }
 

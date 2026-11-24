@@ -3,6 +3,7 @@ import { h } from './dom.js';
 import { screenLayout, nameInput, toggleButton } from './components.js';
 import { showToast } from './toast.js';
 import * as audio from '../audio.js';
+import { createNotifier } from '../notify.js';
 
 export const title = 'Einstellungen';
 
@@ -43,7 +44,7 @@ function notifyRow(notifier) {
     toggle.el);
 }
 
-export function render({ settings, prefs, notifier = null }) {
+export function render({ settings, prefs, notifier = createNotifier() }) {
   const { el, body } = screenLayout({ id: 'settings', title: 'Einstellungen' });
   const sound = toggleButton({ label: 'Ton', pressed: audio.isEnabled(), iconOn: 'soundOn', iconOff: 'soundOff', className: 'toggle--switch', onChange: (on) => prefs.setSound(on) });
   const fxToggle = toggleButton({ label: 'Effekte reduzieren', pressed: settings.getReducedFx(), iconOn: 'calm', className: 'toggle--switch', onChange: (on) => prefs.setReducedFx(on) });
