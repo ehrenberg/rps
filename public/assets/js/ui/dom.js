@@ -30,10 +30,18 @@ function applyAttrs(el, attrs) {
     if (key === 'class') el.className = Array.isArray(value) ? value.filter(Boolean).join(' ') : value;
     else if (key === 'text') el.textContent = String(value);
     else if (key === 'dataset') Object.assign(el.dataset, value);
-    else if (key === 'style') Object.assign(el.style, value);
+    else if (key === 'style') applyStyle(el, value);
     else if (key.startsWith('on') && typeof value === 'function') el.addEventListener(key.slice(2), value);
     else if (value === true) el.setAttribute(key, '');
     else el.setAttribute(key, String(value));
+  }
+}
+
+/** Inline-Styles setzen; Custom Properties („--x“) wirken nur über style.setProperty. */
+export function applyStyle(el, style) {
+  for (const [prop, val] of Object.entries(style ?? {})) {
+    if (prop.startsWith('--')) el.style.setProperty(prop, String(val));
+    else el.style[prop] = val;
   }
 }
 

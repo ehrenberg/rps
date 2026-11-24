@@ -2,14 +2,12 @@
 import { h, replaceChildren } from './dom.js';
 import { icon } from './icons.js';
 import { screenLayout } from './components.js';
-import { REACTIONS } from './arena-view.js';
-import { buildBracket, tournamentRole, MATCH_STATUS } from '../bracket.js';
+import { reactionBar } from './reaction-bar.js';
+import { buildBracket, tournamentRole, tournamentKey, myLiveMatchId, shouldScrollToMatch } from '../bracket.js';
 import { VARIANT_NAMES } from '../rules.js';
+import { singleFlight } from '../throttle.js';
 import * as fx from '../fx.js';
 import * as audio from '../audio.js';
-import { centerOf } from './dom.js';
-
-const REACTION_COOLDOWN_MS = 1000;
 const STATUS_TEXT = Object.freeze({ live: 'läuft', done: 'fertig', bye: 'Freilos', pending: 'wartet' });
 const ROLE_TEXT = Object.freeze({
   spectator: 'Du schaust zu – feuere alle an!',
@@ -18,6 +16,12 @@ const ROLE_TEXT = Object.freeze({
   out: 'Ausgeschieden – aber zuschauen macht auch Spaß.',
   champion: 'Du hast das Turnier gewonnen!',
 });
+
+/** Fallback ohne Sitzung: nur diese Ansicht merkt sich das Feiern. */
+function memoryCelebration() {
+  const seen = new Set();
+  return { done: (key) => seen.has(key), mark: (key) => seen.add(key) };
+}
 
 function slotEl(slot) {
   if (!slot.id) return h('li', { class: 'slot slot--empty' }, h('span', { class: 'slot__name' }, slot.placeholder));
@@ -33,34 +37,28 @@ function matchEl(m) {
 }
 
 /**
- * @param {{ state, me, onReact:(emoji)=>void, onRestart:()=>void, onPlay:()=>void, onLeave:()=>void }} o
+ * @param {{ state, me, onReact:(emoji)=>void, onRestart:()=>Promise|void, onPlay:()=>void, onLeave:()=>void,
+ *           celebration?:{ done(key:string):boolean, mark(key:string):void } }} o
+ *   celebration: merkt sich (pro Raum, über Reloads hinweg) die schon gefeierten Turniere
  */
-export function bracketView({ state: initial, me, onReact, onRestart, onPlay, onLeave }) {
+export function bracketView({ state: initial, me, onReact, onRestart, onPlay, onLeave, celebration = memoryCelebration() }) {
   const { el, body, heading } = screenLayout({
     id: 'bracket', title: 'Turnier',
     subtitle: `${VARIANT_NAMES[initial.variant]} · Best of ${initial.bestOf}`,
   });
   const role = h('div', { class: 'bracket__role glass', role: 'status' });
   const tree = h('div', { class: 'bracket', tabindex: '0', 'aria-label': 'Turnierbaum (seitlich scrollbar)' });
-  let cooldown = false;
-  const reactions = h('div', { class: 'reactions', role: 'group', 'aria-label': 'Reaktion senden' },
-    REACTIONS.map((emoji) => h('button', {
-      type: 'button', class: 'reactions__btn', 'aria-label': `Reaktion ${emoji}`,
-      onclick: (e) => {
-        if (cooldown) return;
-        cooldown = true;
-        setTimeout(() => { cooldown = false; }, REACTION_COOLDOWN_MS);
-        fx.floatEmoji(emoji, { x: centerOf(e.currentTarget).x });
-        audio.play('pop');
-        onReact(emoji);
-      },
-    }, emoji)));
+  const reactions = reactionBar({ onReact }).el;
   const champion = h('div', { class: 'champion', hidden: true });
   const leave = h('button', { type: 'button', class: 'btn btn--ghost', onclick: onLeave }, icon('door', { size: 18 }), 'Turnier verlassen');
   body.append(champion, role, tree, reactions, h('div', { class: 'lobby__footer' }, leave));
-  let celebrated = null;
+  let scrolledTo; // undefined = noch nie gerendert
+  let lastState = initial;
+  // „Neues Turnier“ nur einmal anfragen, bis die Antwort da ist
+  const restart = singleFlight(() => onRestart(), { onChange: () => update(lastState) });
 
   function update(state) {
+    lastState = state;
     const b = buildBracket(state, me);
     const r = tournamentRole(state, me);
     replaceChildren(role,
@@ -69,8 +67,12 @@ export function bracketView({ state: initial, me, onReact, onRestart, onPlay, on
     replaceChildren(tree, b.rounds.map((round) => h('section', { class: ['bround', round.index + 1 === state.round && state.status === 'running' && 'bround--current'] },
       h('h2', { class: 'bround__title' }, round.title),
       h('ol', { class: 'bround__matches' }, round.matches.map(matchEl)))));
-    const mine = tree.querySelector('.bmatch--mine.bmatch--live');
-    mine?.scrollIntoView?.({ block: 'nearest', inline: 'center' });
+    // Nur beim ersten Rendern bzw. wenn sich mein Match ändert – nicht bei jeder Version
+    const liveId = myLiveMatchId(b);
+    if (shouldScrollToMatch(scrolledTo, liveId)) {
+      tree.querySelector('.bmatch--mine.bmatch--live')?.scrollIntoView?.({ block: 'nearest', inline: 'center' });
+    }
+    scrolledTo = liveId;
 
     champion.hidden = !b.champion && state.status !== 'finished';
     if (state.status === 'finished') {
@@ -81,11 +83,11 @@ export function bracketView({ state: initial, me, onReact, onRestart, onPlay, on
         h('h2', { class: 'champion__name' }, b.champion ? b.champion.name : 'Kein Sieger'),
         h('p', { class: 'champion__text' }, b.champion?.id === me ? 'Das bist du! Unschlagbar.' : 'Herzlichen Glückwunsch!'),
         isHost
-          ? h('button', { type: 'button', class: 'btn btn--primary btn--lg', onclick: onRestart }, icon('replay'), 'Neues Turnier')
+          ? h('button', { type: 'button', class: 'btn btn--primary btn--lg', disabled: restart.busy, onclick: () => restart() }, icon('replay'), 'Neues Turnier')
           : h('p', { class: 'muted' }, 'Der Host kann ein neues Turnier mit allen starten.'));
-      const key = b.rounds.flatMap((rd) => rd.matches.map((m) => m.id)).join(',');
-      if (b.champion && celebrated !== key) {
-        celebrated = key;
+      const key = tournamentKey(state);
+      if (b.champion && !celebration.done(key)) {
+        celebration.mark(key);
         fx.confetti({});
         audio.play(b.champion.id === me ? 'matchWin' : 'win');
       }

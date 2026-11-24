@@ -5,6 +5,7 @@ import { screenLayout } from './components.js';
 import { shareCard } from './share.js';
 import { handIcon } from '../hands.js';
 import { VARIANT_NAMES } from '../rules.js';
+import { singleFlight } from '../throttle.js';
 
 export const MIN_TOURNAMENT_PLAYERS = 3;
 export const MAX_TOURNAMENT_PLAYERS = 16;
@@ -19,7 +20,7 @@ function waitingAnimation(text) {
 }
 
 /**
- * @param {{ state, me, code, onStart:()=>void, onLeave:()=>void }} o
+ * @param {{ state, me, code, onStart:()=>Promise|void, onLeave:()=>void }} o
  * @returns {{ el, focus, update(state), dispose }}
  */
 export function lobbyView({ state: initial, me, code, onStart, onLeave }) {
@@ -39,8 +40,12 @@ export function lobbyView({ state: initial, me, code, onStart, onLeave }) {
   const listPanel = h('section', { class: 'panel glass' }, h('h2', { class: 'panel__title' }, 'Spieler'), list);
   const leave = h('button', { type: 'button', class: 'btn btn--ghost', onclick: onLeave }, icon('door', { size: 18 }), 'Raum verlassen');
   body.append(...[status, share, isDuel ? null : listPanel, h('div', { class: 'lobby__footer' }, leave)].filter(Boolean));
+  let lastState = initial;
+  // „Turnier starten“ nur einmal anfragen, bis die Antwort da ist
+  const start = singleFlight(() => onStart(), { onChange: () => update(lastState) });
 
   function update(state) {
+    lastState = state;
     const players = activePlayers(state);
     const isHost = state.host === me;
     if (isDuel) {
@@ -57,7 +62,7 @@ export function lobbyView({ state: initial, me, code, onStart, onLeave }) {
     if (isHost) {
       const enough = players.length >= MIN_TOURNAMENT_PLAYERS;
       replaceChildren(status, count,
-        h('button', { type: 'button', class: 'btn btn--primary btn--lg btn--start', disabled: !enough, onclick: onStart }, 'Turnier starten', icon('trophy')),
+        h('button', { type: 'button', class: 'btn btn--primary btn--lg btn--start', disabled: !enough || start.busy, onclick: () => start() }, 'Turnier starten', icon('trophy')),
         h('p', { class: 'muted' }, enough ? 'Alle da? Dann los!' : `Ab ${MIN_TOURNAMENT_PLAYERS} Spielern – teil den Link.`));
     } else {
       const host = (state.players ?? []).find((p) => p.id === state.host)?.name ?? 'Host';
