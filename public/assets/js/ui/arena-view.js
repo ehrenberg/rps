@@ -265,7 +265,7 @@ export function createArenaView(opts) {
 
     /** Online: Gegner hat gewählt – sein Hash (Fingerabdruck) wird vor dem Aufdecken gezeigt. */
     setOpponentCommit(hash) {
-      showCommit(`🔒 ${oppName} hat gewählt: ${shortHash(hash)}`,
+      showCommit(`🔒 gewählt: ${shortHash(hash)}`,
         `${oppName} hat gewählt, Fingerabdruck ${shortHash(hash)}`,
         `${oppName} hat seinen Zug festgelegt – das ist der Fingerabdruck (SHA-256). Nach dem Aufdecken wird er geprüft.`);
     },
@@ -278,6 +278,12 @@ export function createArenaView(opts) {
 
     setChosen(move) {
       setMovesEnabled(false);
+      // Statt „… wähle deinen Zug“ bzw. eines alten Fehlers jetzt auf den Gegner warten
+      // (das Ergebnis der Vorrunde bleibt stehen)
+      if (result.querySelector('.result__hint') || result.classList.contains('result--error')) {
+        result.className = 'result';
+        replaceChildren(result, h('span', { class: 'result__hint' }, `Warte auf ${oppName} …`));
+      }
       moveButtons.get(move)?.classList.add('move-btn--chosen');
       audio.play('pop');
     },
@@ -329,7 +335,7 @@ export function createArenaView(opts) {
       result.className = `result result--${key}`;
       replaceChildren(result,
         h('span', { class: 'result__sentence' }, round.sentence),
-        h('span', { class: 'result__sub' }, round.forfeit ? 'Nicht rechtzeitig aufgedeckt.' : OUTCOME_TEXT[round.outcome]));
+        h('span', { class: 'result__sub' }, OUTCOME_TEXT[round.outcome])); // Forfeit steht schon im Satz
       animate(result, [{ transform: 'translateY(10px) scale(.96)', opacity: 0 }, { transform: 'none', opacity: 1 }], { duration: RESULT_IN_MS, easing: 'ease-out' });
       audio.play(key);
       announce(`${round.sentence}. ${OUTCOME_TEXT[round.outcome]}`);

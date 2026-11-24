@@ -438,7 +438,7 @@ test('Turnier: verfolgt festes Match, statsMode tournament', () => {
   const t = setup(state);
   assert.equal(t.adapter.info.statsMode, 'tournament');
   assert.equal(t.adapter.matchId, 'm1');
-  assert.match(t.last('matchStart').oppDetail, /Runde 1/);
+  assert.equal(t.last('matchStart').oppDetail, '', 'Turnierrunde steht schon oben (kein doppeltes „Runde“)');
 });
 
 test('Commit-Frist: Säumiger sieht eigene Frist, Wartender die des Gegners', () => {
@@ -460,4 +460,42 @@ test('Forfeit durch Commit-Frist: Runde ohne Züge, kein Beweis, Punkt an den W�
   assert.equal(r.outcome, -1);
   assert.equal(r.sentence, 'Zeit abgelaufen – Runde an Ben');
   assert.deepEqual(r.score, [0, 1]);
+});
+
+test('Reload direkt nach dem Klick: gespeicherter Zug passt zum Server-Hash → weiter als abgegeben', async () => {
+  const session = createRoomSession(memory());
+  const hash = await commitHash('rock', 'r'.repeat(32));
+  session.setPending(CODE, { matchId: 'm1', round: 0, move: 'rock', nonce: 'r'.repeat(32), hash });
+  const t = setup(duel({ cur: { committed: [true, false], commit: [hash, null] } }), { session });
+  assert.deepEqual(t.last('moveRestored'), { move: 'rock' });
+  t.adapter.update(duel({ version: 2, cur: { committed: [true, true], commit: [hash, 'x'], lockedAt: 990 } }));
+  await settle();
+  assert.equal(t.calls.find((c) => c.action === 'reveal')?.move, 'rock');
+});
+
+test('Reload: gespeicherter Zug passt NICHT zum Server-Hash → nicht aufdecken, verständlicher Hinweis', () => {
+  const session = createRoomSession(memory());
+  session.setPending(CODE, { matchId: 'm1', round: 0, move: 'rock', nonce: 'r'.repeat(32), hash: 'anders' });
+  const t = setup(duel({ cur: { committed: [true, true], commit: ['server', 'x'], lockedAt: 990 } }), { session });
+  assert.deepEqual(t.last('moveRestored'), { move: null });
+  assert.match(t.last('error').message, /nicht mehr bekannt/);
+  assert.equal(t.calls.some((c) => c.action === 'reveal'), false);
+});
+
+test('Pending liegt schon vor dem commit-Request im Speicher (Reload während des Requests)', async () => {
+  const t = setup(duel());
+  let seen = null;
+  t.apiFn.hook = async (action) => { if (action === 'commit') seen = t.session.getPending(CODE); };
+  await t.adapter.submitMove('paper');
+  assert.equal(seen?.move, 'paper');
+  assert.equal(seen.hash, await commitHash('paper', 'n'.repeat(32)));
+});
+
+test('Revanche nach beanspruchtem Sieg: Gegner offline → keine Revanche möglich, zurück online → wieder möglich', () => {
+  const t = setup(duel());
+  t.adapter.updateOnline({ [A]: true, [B]: false });
+  t.adapter.update(duel({ version: 2, winner: 0, end: 'claim', score: [0, 0] }));
+  assert.equal(t.last('rematchStatus').oppLeft, true);
+  t.adapter.updateOnline({ [A]: true, [B]: true });
+  assert.equal(t.last('rematchStatus').oppLeft, false);
 });

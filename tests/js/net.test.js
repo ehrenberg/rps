@@ -240,3 +240,25 @@ test('Poller: Fehler in onState → eigener Fehlertyp, Version nicht übernommen
     console.error = origError;
   }
 });
+
+test('Poller: Browser meldet „online“ → sofort neu laden statt Backoff abzuwarten', async () => {
+  let fail = true;
+  const apiFn = async () => { if (fail) throw new ApiError('weg', 0); return { version: 1, players: [] }; };
+  const timers = fakeTimers();
+  const events = new EventTarget();
+  const conn = [];
+  const poller = createPoller({ code: 'abc234', token: 't', apiFn, timers, events, isHidden: () => false,
+    onState() {}, onConnection: (ok) => conn.push(ok) });
+  poller.start();
+  await flush();
+  await timers.run();
+  assert.equal(timers.pending.ms, 2000, 'Backoff läuft');
+  fail = false;
+  events.dispatchEvent(new Event('online'));
+  assert.equal(timers.pending.ms, 0, 'sofort neuer Versuch');
+  await timers.run();
+  assert.deepEqual(conn, [false, true], 'Verbindungshinweis sofort weg');
+  poller.stop();
+  events.dispatchEvent(new Event('online'));
+  assert.equal(timers.pending, null, 'nach stop kein Listener mehr');
+});

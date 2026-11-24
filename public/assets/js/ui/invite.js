@@ -7,7 +7,7 @@ import { VARIANTS, VARIANT_NAMES } from '../rules.js';
 import { handIcon } from '../hands.js';
 import { api } from '../net.js';
 import { hrefFor } from '../router.js';
-import { inviteErrorKind } from '../room-flow.js';
+import { inviteErrorKind, closedInviteText } from '../room-flow.js';
 
 function headline(info) {
   const host = info.hostName ?? 'Jemand';
@@ -65,7 +65,7 @@ export function inviteView({ code, settings, onJoined, announce = null }) {
         facts(info),
         info.names?.length ? h('p', { class: 'invite__names' }, `Dabei: ${info.names.join(', ')}`) : null,
         info.spectate && !info.joinable ? h('p', { class: 'muted' }, 'Das Turnier läuft schon – du kannst zuschauen und mitfiebern.') : null,
-        canJoin ? nameField.el : h('p', { class: 'invite__closed' }, info.type === 'duel' ? 'Dieses Duell ist schon voll.' : 'Hier ist kein Platz mehr frei.')),
+        canJoin ? nameField.el : h('p', { class: 'invite__closed' }, closedInviteText(info))),
       canJoin ? h('div', { class: 'sticky-action' }, btn) : h('a', { class: 'btn btn--lg', href: hrefFor('home') }, icon('home'), 'Zum Start'));
   }
 

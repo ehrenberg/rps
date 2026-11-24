@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { decideRoute, inviteErrorKind, leaveClearsSession, MATCH_TOAST } from '../../public/assets/js/room-flow.js';
+import { decideRoute, inviteErrorKind, leaveClearsSession, MATCH_TOAST, myRunningMatch, closedInviteText } from '../../public/assets/js/room-flow.js';
 import { ApiError } from '../../public/assets/js/net.js';
 
 const A = 'p_a';
@@ -81,4 +81,20 @@ test('Verlassen: Sitzung nur bei Erfolg oder 403/404 löschen', () => {
   assert.equal(leaveClearsSession(new ApiError('Raum weg', 404)), true);
   assert.equal(leaveClearsSession(new ApiError('Keine Verbindung zum Server.', 0)), false);
   assert.equal(leaveClearsSession(new ApiError('Serverfehler (500).', 500)), false);
+});
+
+test('myRunningMatch: eigenes laufendes Match (Verlassen zählt als Niederlage, Menü fragt nach)', () => {
+  assert.deepEqual(myRunningMatch(duel(), A), { id: 'm1', mode: 'duel', recordId: 'm:m1' });
+  assert.equal(myRunningMatch(duel({ matches: { m1: match('m1', [A, B], { winner: 0, end: 'score' }) } }), A), null);
+  assert.equal(myRunningMatch(duel(), C), null, 'Zuschauer');
+  assert.equal(myRunningMatch(duel({ status: 'lobby', current: null, matches: {} }), A), null);
+  assert.deepEqual(myRunningMatch(tournament(), A), { id: 'm1', mode: 'tournament', recordId: 'm:m1' });
+  assert.equal(myRunningMatch(tournament({ myMatch: null }), C), null);
+  assert.equal(myRunningMatch(null, A), null);
+});
+
+test('closedInviteText: beendet ≠ voll; voll mit Hinweis auf anderen Tab', () => {
+  assert.equal(closedInviteText({ type: 'duel', status: 'finished' }), 'Dieses Duell ist schon beendet.');
+  assert.match(closedInviteText({ type: 'duel', status: 'running' }), /schon voll.*anderen Tab.*verloren/s);
+  assert.equal(closedInviteText({ type: 'tournament', status: 'running' }), 'Hier ist kein Platz mehr frei.');
 });

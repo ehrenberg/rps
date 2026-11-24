@@ -10,9 +10,9 @@ import { mountArena } from './arena-screen.js';
 import { api, createPoller, createRoomSession, RECONNECT_TEXT, HTTP, StateHandlerError } from '../net.js';
 import { createOnlineOpponent, newReactions, maxReactionId } from '../online-opponent.js';
 import { tournamentRole, roundTitle, tournamentKey } from '../bracket.js';
-import { decideRoute, leaveClearsSession } from '../room-flow.js';
+import { decideRoute, leaveClearsSession, myRunningMatch } from '../room-flow.js';
 import { VARIANT_NAMES } from '../rules.js';
-import { recordTournament } from '../stats.js';
+import { recordTournament, recordMatch } from '../stats.js';
 import { hrefFor } from '../router.js';
 import * as fx from '../fx.js';
 import * as audio from '../audio.js';
@@ -52,13 +52,29 @@ export function render({ params, settings, announce, navigate }) {
     });
     if (!ok || leaving || !creds) return;
     leaving = true;
+    const running = myRunningMatch(lastState, creds.me);
     let failure = null;
     try { await api('leave', { code, token: creds.token }); } catch (err) { failure = err; }
     leaving = false;
     // Bei Netz-/Serverfehler bleibt der Platz (sonst wäre man ausgesperrt, obwohl man noch drin ist)
     if (!leaveClearsSession(failure)) { showError(failure); return; }
+    // Wie im Dialog versprochen: ein laufendes Match zählt als verloren (höchstens einmal)
+    if (!failure && running && !session.wasRecorded(code, running.recordId)) {
+      recordMatch({ mode: running.mode, result: 'l' });
+    }
     session.clear(code);
     navigate(hrefFor('home'));
+  }
+
+  /** „Menü“/„Zurück“ in der Arena: bei laufendem eigenem Match erst nachfragen. */
+  function confirmMenu(e) {
+    if (!myRunningMatch(lastState, creds?.me)) return;
+    e?.preventDefault();
+    confirmDialog({
+      title: 'Match verlassen?',
+      text: 'Du bist noch im Match – wirklich gehen? Du kannst über den Link zurückkehren.',
+      confirmLabel: 'Zum Menü',
+    }).then((ok) => { if (ok) navigate(hrefFor('home')); });
   }
 
   const act = (action, params = {}) => api(action, { code, token: creds.token, ...params })
@@ -81,13 +97,14 @@ export function render({ params, settings, announce, navigate }) {
     const roundIdx = (state.bracket ?? []).findIndex((r) => r.includes(matchId));
     const modeLabel = kind === 'duel'
       ? `Online · ${VARIANT_NAMES[state.variant]} · Best of ${state.bestOf}`
-      : `Turnier · ${roundTitle(roundIdx, state.bracket.length)} · Best of ${state.bestOf}`;
+      : `${roundTitle(roundIdx, state.bracket.length)} · Best of ${state.bestOf}`; // Turnierrunde nur hier
     const arena = mountArena({
       adapter, settings, announce, modeLabel,
       myName: state.players.find((p) => p.id === creds.me)?.name,
       againLabel: kind === 'duel' ? 'Revanche' : 'Zum Turnierbaum',
       onAgain: kind === 'duel' ? undefined : () => { dismissedMatch = adapter.matchId; route(lastState); },
       onLeave: leaveRoom,
+      onMenu: confirmMenu,
     });
     show({
       kind: 'arena', matchId: adapter.matchId, el: arena.el, focus: arena.focus,

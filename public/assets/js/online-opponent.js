@@ -165,17 +165,12 @@ export function createOnlineOpponent({
       bestOf: state.bestOf,
       target: v.match.target,
       oppName: playerName(v.oppId),
-      oppDetail: kind === 'duel' ? '' : `Runde ${roundOf(id)}`,
+      oppDetail: '', // Turnierrunde steht schon im Kopf der Arena („Halbfinale“)
       score: [...score],
       history: v.match.history.map((e, i) => toRound(e, (v.match.dropped ?? 0) + i + 1, v)),
       series: series(v),
     });
     return true;
-  }
-
-  function roundOf(id) {
-    const i = (state.bracket ?? []).findIndex((r) => r.includes(id));
-    return i >= 0 ? i + 1 : state.round ?? 1;
   }
 
   function opponentState(v) {
@@ -333,9 +328,16 @@ export function createOnlineOpponent({
       });
       emitDeadline(null);
     }
+    emitRematch(v);
+  }
+
+  /** Revanche-Wünsche (Duell). Nach beanspruchtem Sieg ist ein offline gegangener Gegner „weg“. */
+  function emitRematch(v) {
     if (kind !== 'duel') return;
     const rematch = state.rematch ?? [];
-    const info = { me: rematch.includes(me), opp: rematch.includes(v.oppId), oppLeft: !v.oppPlayer || v.oppPlayer.left };
+    const opp = opponentState(v);
+    const gone = opp === 'left' || (v.match.end === 'claim' && opp === 'offline');
+    const info = { me: rematch.includes(me), opp: rematch.includes(v.oppId), oppLeft: gone };
     const key = JSON.stringify(info);
     if (key !== lastRematch) {
       lastRematch = key;
@@ -389,6 +391,8 @@ export function createOnlineOpponent({
       if (disposed) return;
       online = { ...map };
       refreshPresence();
+      const v = view();
+      if (v && overEmitted) emitRematch(v);
     },
 
     async submitMove(move) {

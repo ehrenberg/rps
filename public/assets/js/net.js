@@ -89,12 +89,14 @@ export function pollInterval(mode, hidden) {
  * Pollt `state` mit since=version.
  * onState(state) bei neuer Version, onOnline(online) bei jeder Antwort ({id: bool}),
  * onError(err, { failures, fatal }) bei Fehlern, onConnection(ok) wenn sich die Erreichbarkeit ändert.
+ * events: Quelle des „online“-Ereignisses (window) – dann wird sofort neu geladen.
  */
 export function createPoller({
   code, token, onState, onOnline = () => {}, onError = () => {}, onConnection = () => {},
   apiFn = api,
   timers = globalThis,
   isHidden = () => globalThis.document?.visibilityState === 'hidden',
+  events = globalThis,
 }) {
   let mode = 'match';
   let version = null;
@@ -116,6 +118,13 @@ export function createPoller({
     connected = ok;
     onConnection(ok);
   };
+
+  /** Sofort neu laden; auch wenn der Browser wieder online ist (statt Backoff abzuwarten). */
+  function poke() {
+    if (!running) return;
+    if (inFlight) again = true;
+    else schedule(0);
+  }
 
   async function tick() {
     if (!running) return;
@@ -168,18 +177,16 @@ export function createPoller({
     start() {
       if (running) return;
       running = true;
+      events?.addEventListener?.('online', poke);
       tick();
     },
     stop() {
       running = false;
+      events?.removeEventListener?.('online', poke);
       timers.clearTimeout(timer);
     },
     /** Sofort neu laden (z. B. nach eigener Aktion oder wenn der Tab sichtbar wird). */
-    poke() {
-      if (!running) return;
-      if (inFlight) again = true;
-      else schedule(0);
-    },
+    poke,
     setMode(next) {
       if (!Object.hasOwn(POLL_MS, next) || next === 'hidden') throw new Error(`Unbekannter Modus: ${next}`);
       mode = next;

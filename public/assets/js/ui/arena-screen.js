@@ -17,10 +17,11 @@ function isTypingTarget(target) {
 /**
  * Arena für beliebigen Adapter aufbauen.
  * @param {{ adapter, settings, announce, modeLabel:string, myName?:string, againLabel?:string,
- *           onAgain?:(controller)=>void, onLeave?:()=>void }} o
+ *           onAgain?:(controller)=>void, onLeave?:()=>void, onMenu?:(e:Event)=>void }} o
+ *   onMenu: Klick auf „Menü“ (Arena oben und Matchende); preventDefault verhindert das Wegnavigieren.
  *   onAgain: Standard = controller.rematch() (Nochmal/Revanche); Turnier: zurück zum Baum.
  */
-export function mountArena({ adapter, settings, announce, modeLabel, myName, againLabel, onAgain, onLeave }) {
+export function mountArena({ adapter, settings, announce, modeLabel, myName, againLabel, onAgain, onLeave, onMenu }) {
   let controller = null;
   const { variant } = adapter.info;
   const view = createArenaView({
@@ -35,6 +36,7 @@ export function mountArena({ adapter, settings, announce, modeLabel, myName, aga
     onReact: (emoji) => controller.react(emoji),
     onClaim: () => controller.claim(),
     onLeave,
+    onMenu,
   });
   controller = createArenaController({ adapter, view, stats });
 

@@ -289,6 +289,9 @@ gelöscht (`room-flow.js`: `leaveClearsSession`).
 decideRoute(state, { me, shown, dismissedMatch? }) → { view: 'lobby'|'arena'|'bracket', matchId?, mode, fresh, toast? }
 inviteErrorKind(err) → 'missing' (nur 404) | 'retry'
 leaveClearsSession(err|null) → bool
+myRunningMatch(state, me) → { id, mode: 'duel'|'tournament', recordId } | null
+     // Verlassen zählt ein laufendes Match als Niederlage (einmal); „Menü“ in der Arena fragt dann nach
+closedInviteText(info) → „schon beendet“ (Duell finished) | „schon voll … anderer Tab …“ | „kein Platz mehr“
 // throttle.js
 singleFlight(fn, { onChange? }) → run (gibt null zurück, solange eine Anfrage läuft; run.busy)
 createCooldown(ms, { timers?, onChange? }) → { take() → bool, active }
@@ -316,7 +319,9 @@ Ablauf einer Runde:
 4. `winner`/`end` gesetzt → `matchOver` mit `recordId` (`m:<matchId>`); `replay: true`, wenn
    `session.wasRecorded(code, recordId)` → keine Statistik. Der Controller zählt und ruft dann
    `markRecorded(recordId)` – so zählt ein Reload mitten in der Animation weder doppelt noch gar nicht.
-   Duell: `rematchStatus` aus `state.rematch`, Serie aus `state.series`.
+   Duell: `rematchStatus` aus `state.rematch` (`oppLeft` auch, wenn nach beanspruchtem Sieg der Gegner
+   offline ist), Serie aus `state.series`. `matchStart.oppDetail` bleibt leer – die Turnierrunde
+   („Halbfinale“) steht im Kopf der Arena, „Runde n“ in der Mitte ist die Spielrunde.
 
 Weitere Ereignisse: `opponentStatus` (`choosing`/`ready`/`offline`/`left`), `deadline`
 (`{ seconds, who: 'reveal'|'commit'|'oppCommit' }` aus `cur.deadline` bzw. `cur.commitDeadline`),
@@ -331,11 +336,12 @@ Weitere DOM-freie Module dazu:
 - `net.js`: `api(action, params, { fetchImpl?, timeoutMs? = API_TIMEOUT_MS (8 s) })` – hängende Requests
   werden per AbortController abgebrochen → `ApiError(…, 0)` (wiederholbar); `ApiError` (`status`,
   `retryable`), `HTTP` (zentrale Statuscodes), `StateHandlerError`; `createPoller({ code, token, onState,
-  onOnline, onError(err, { failures, fatal }), onConnection(ok), apiFn?, timers?, isHidden? })` mit
+  onOnline, onError(err, { failures, fatal }), onConnection(ok), apiFn?, timers?, isHidden?, events? })` mit
   `start/stop/poke/setMode('match'|'idle'|'end')`, `POLL_MS` (1 s / 1 s / 5 s, versteckt ≥ 3 s),
   Backoff 1→2→4→8→10 s, `RECONNECT_TEXT`; 403/404 sind fatal. Wirft `onState`, meldet der Poller
   `StateHandlerError` an `onError` (kein Verbindungsfehler) und übernimmt die Version nicht – der Zustand
-  wird beim nächsten Poll erneut verarbeitet.
+  wird beim nächsten Poll erneut verarbeitet. Meldet `events` (window) „online“, wird sofort neu geladen
+  (kein Warten auf den Backoff; der Verbindungshinweis verschwindet beim ersten Erfolg).
   `createRoomSession(storage)` → `get/set/clear(code)`, `get/set/clearPending(code)`,
   `wasRecorded/markRecorded(code, id)` (IDs `m:<match>`, `t:<matches>`, `confetti:t:<matches>`; sessionStorage-Schlüssel `rps.token.`, `rps.me.`,
   `rps.pending.`, `rps.recorded.` + Code).
