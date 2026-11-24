@@ -11,7 +11,10 @@
     "down": "docker compose down",
     "test:php": "docker compose --profile tools run --rm -T php php tests/run.php",
     "lint:php": "docker compose --profile tools run --rm -T php sh -c 'for f in $(find public tests -name \"*.php\"); do php -l \"$f\" >/dev/null || exit 1; done && echo PHP-Lint ok'",
-    "test:e2e": "node --test tests/e2e/"
+    "test:e2e": "node --test tests/e2e/",
+    "icons": "bash scripts/icons.sh",
+    "dist": "bash scripts/dist.sh",
+    "check:deploy": "node scripts/check-deploy.mjs"
   },
   "devDependencies": {
     "playwright": "1.65.1"

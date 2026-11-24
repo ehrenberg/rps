@@ -4,7 +4,7 @@ public/data/*
 !public/data/index.html
 
 # Dev
-node_modules/
+node_modules
 .DS_Store
 *.log
 .env
@@ -12,3 +12,6 @@ node_modules/
 
 # Agenten-Worktrees
 .claude/worktrees/
+
+# Upload-Paket (npm run dist)
+dist/

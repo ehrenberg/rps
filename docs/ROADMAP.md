@@ -45,7 +45,7 @@ Jede Phase endet mit etwas Spielbarem. Abnahme jeweils im Browser (Desktop + Han
 
 ## Phase 6 – Feinschliff & Livegang
 - [ ] Barrierefreiheit (Tastatur, Fokus, ARIA-Live für Ergebnisse, Kontrast)
-- [ ] Favicon, Manifest (optional PWA ohne Service-Worker-Tracking)
+- [x] Favicon, Manifest (optional PWA ohne Service-Worker-Tracking)
 - [ ] Deployment nach [DEPLOYMENT.md](DEPLOYMENT.md), Checkliste abhaken
 
 ## Querschnitt (Qualität)
