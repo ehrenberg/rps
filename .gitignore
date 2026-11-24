@@ -1,0 +1,11 @@
+# Laufzeitdaten
+public/data/*
+!public/data/.htaccess
+!public/data/index.html
+
+# Dev
+node_modules/
+.DS_Store
+*.log
+.env
+.claude/settings.local.json
