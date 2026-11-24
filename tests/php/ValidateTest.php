@@ -149,3 +149,62 @@ function test_validate_name_nfc_if_intl_available(): void
     }
     assert_same("Jo\u{00E9}l", rps_clean_name($decomposed));
 }
+
+/** @return array<string, mixed> Gemeinsame Namens-Fälle (auch von tests/js/settings.test.js gelesen). */
+function t_name_fixtures(): array
+{
+    return json_decode((string) file_get_contents(__DIR__ . '/../fixtures/names.json'), true, 16, JSON_THROW_ON_ERROR);
+}
+
+function test_validate_name_shared_fixtures_valid(): void
+{
+    $f = t_name_fixtures();
+    assert_same(RPS_NAME_MAX, $f['maxGraphemes']);
+    assert_same(RPS_NAME_MAX_CODEPOINTS, $f['maxCodepoints']);
+    foreach ($f['valid'] as $c) {
+        assert_same($c['out'], rps_clean_name($c['in']), $c['note']);
+        assert_same($c['out'], rps_clean_name($c['out']), $c['note'] . ' (idempotent)');
+    }
+}
+
+function test_validate_name_shared_fixtures_too_long(): void
+{
+    foreach (t_name_fixtures()['tooLong'] as $c) {
+        assert_rps_error(static fn() => rps_clean_name($c['in']), 400, '20 Zeichen');
+        // Die Kürzung des Clients nimmt der Server unverändert an
+        assert_same($c['truncated'], rps_clean_name($c['truncated']), $c['note']);
+    }
+}
+
+function test_validate_name_shared_fixtures_empty(): void
+{
+    foreach (t_name_fixtures()['empty'] as $in) {
+        assert_rps_error(static fn() => rps_clean_name($in), 400, 'Namen');
+    }
+}
+
+function test_validate_graphemes_match_browser_segmenter(): void
+{
+    foreach (t_name_fixtures()['graphemeCounts'] as [$s, $n]) {
+        assert_same($n, count(rps_graphemes($s)), $s);
+        assert_same($s, implode('', rps_graphemes($s)), $s);
+    }
+}
+
+function test_validate_name_counts_graphemes_not_codepoints(): void
+{
+    $flag = "🏳\u{FE0F}\u{200D}🌈";
+    assert_same(1, count(rps_graphemes($flag)));
+    assert_same(str_repeat($flag, 20), rps_clean_name(str_repeat($flag, 20)));
+    assert_rps_error(static fn() => rps_clean_name(str_repeat($flag, 21)), 400, '20 Zeichen');
+    assert_rps_error(static fn() => rps_clean_name('a' . str_repeat("\u{0332}", 80)), 400, '20 Zeichen');
+}
+
+function test_validate_unique_name_is_grapheme_safe(): void
+{
+    $flag = "🏳\u{FE0F}\u{200D}🌈";
+    $name = str_repeat($flag, 20);
+    $u = rps_unique_name($name, [$name]);
+    assert_same(str_repeat($flag, 18) . ' 2', $u);
+    assert_same($u, rps_clean_name($u));
+}

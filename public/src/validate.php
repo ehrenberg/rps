@@ -20,7 +20,8 @@ final class RpsError extends RuntimeException
 
 const RPS_CODE_ALPHABET = '23456789abcdefghjkmnpqrstuvwxyz';
 const RPS_CODE_LENGTH = 6;
-const RPS_NAME_MAX = 20;
+const RPS_NAME_MAX = 20;            // Grapheme (sichtbare Zeichen)
+const RPS_NAME_MAX_CODEPOINTS = 80; // hartes Limit gegen Combining-Spam
 const RPS_EMOJIS = ['👍', '😂', '😱', '🔥', '😭', '🤝', '👏', '😈'];
 
 /** Zufällige Zeichenkette aus dem Raumcode-Alphabet (CSPRNG). */
@@ -80,7 +81,8 @@ const RPS_EMOJI_CHARS = '\x{2300}-\x{23FF}\x{2600}-\x{27BF}\x{2B00}-\x{2BFF}\x{1
 /**
  * Bereinigt einen Namen: NFC (falls intl vorhanden), alle Leerraumarten → ein Leerzeichen,
  * unsichtbare Füll-, Steuer- und Formatzeichen raus (ZWJ nur zwischen Emoji erlaubt), trimmen.
- * Erlaubt 1–20 Zeichen (Codepoints).
+ * Erlaubt 1–20 Grapheme und höchstens 80 Codepoints. Gleiche Regeln wie sanitizeName() in
+ * public/assets/js/settings.js; gemeinsame Testfälle in tests/fixtures/names.json.
  */
 function rps_clean_name(mixed $name): string
 {
@@ -91,14 +93,36 @@ function rps_clean_name(mixed $name): string
         throw new RpsError('Ungültiger Name.', 400);
     }
     $name = rps_strip_invisible(rps_normalize_nfc($name));
-    $len = mb_strlen($name, 'UTF-8');
-    if ($len === 0) {
+    if ($name === '') {
         throw new RpsError('Bitte gib einen Namen ein.', 400);
     }
-    if ($len > RPS_NAME_MAX) {
+    if (count(rps_graphemes($name)) > RPS_NAME_MAX || mb_strlen($name, 'UTF-8') > RPS_NAME_MAX_CODEPOINTS) {
         throw new RpsError('Der Name darf höchstens 20 Zeichen lang sein.', 400);
     }
     return $name;
+}
+
+/** Emoji-Basiszeichen (Extended_Pictographic, grob; ohne Regional Indicators – die kann \X). */
+const RPS_EMOJI_BASE = '\x{00A9}\x{00AE}\x{203C}\x{2049}\x{2122}\x{2139}\x{2194}-\x{21AA}\x{2300}-\x{23FF}\x{24C2}'
+    . '\x{25AA}-\x{27BF}\x{2934}\x{2935}\x{2B00}-\x{2BFF}\x{3030}\x{303D}\x{3297}\x{3299}\x{1F000}-\x{1F1E5}\x{1F200}-\x{1FAFF}';
+/** Was an einem Emoji hängt: Variation Selector, Hautton, Keycap, Tag-Zeichen, Combining. */
+const RPS_EMOJI_EXTEND = '\p{M}\x{1F3FB}-\x{1F3FF}\x{E0020}-\x{E007F}';
+
+/**
+ * Zerlegt in Grapheme wie Intl.Segmenter im Browser (PCRE \X, braucht kein intl).
+ * Emoji-Folgen werden explizit erkannt: ältere PCRE2 (z. B. 10.39 in PHP 8.1) kleben aufeinanderfolgende Emoji
+ * fälschlich zu einem \X zusammen („😀😀“ = 1).
+ * @return list<string>
+ */
+function rps_graphemes(string $s): array
+{
+    $b = RPS_EMOJI_BASE;
+    $x = RPS_EMOJI_EXTEND;
+    $emoji = "[$b][$x]*(?:\\x{200D}[$b][$x]*)*";
+    if (preg_match_all("/$emoji|\\X/u", $s, $m) === false) {
+        throw new RpsError('Ungültiger Name.', 400);
+    }
+    return $m[0];
 }
 
 function rps_normalize_nfc(string $s): string
@@ -118,6 +142,7 @@ function rps_strip_invisible(string $s): string
         '/[\s\p{Z}]/u' => ' ',                                      // Tab, NBSP, U+2000–200A … → Leerzeichen
         '/[' . RPS_INVISIBLE_CHARS . ']/u' => '',
         '/[^\P{C}\x{200D}]/u' => '',                                // \p{C} außer ZWJ
+        '/(^| )[\x{FE00}-\x{FE0F}]+/u' => '$1',                       // Variation Selector ohne Basiszeichen
         "/(?<![$e])\\x{200D}|\\x{200D}(?![$e])/u" => '',            // ZWJ nur zwischen Emoji
         '/ {2,}/' => ' ',
     ];
@@ -142,7 +167,12 @@ function rps_unique_name(string $name, array $taken): string
     }
     for ($i = 2; ; $i++) {
         $suffix = ' ' . $i;
-        $base = mb_substr($name, 0, RPS_NAME_MAX - mb_strlen($suffix, 'UTF-8'), 'UTF-8');
+        // Grapheme-sicher kürzen: kein halbes Emoji, Codepoint-Limit bleibt eingehalten
+        $parts = array_slice(rps_graphemes($name), 0, RPS_NAME_MAX - strlen($suffix));
+        while ($parts !== [] && mb_strlen(implode('', $parts), 'UTF-8') + strlen($suffix) > RPS_NAME_MAX_CODEPOINTS) {
+            array_pop($parts);
+        }
+        $base = implode('', $parts);
         $candidate = rtrim($base) . $suffix;
         if (!in_array(mb_strtolower($candidate, 'UTF-8'), $lower, true)) {
             return $candidate;

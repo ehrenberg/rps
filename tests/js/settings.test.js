@@ -1,8 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import {
-  sanitizeName, normalizeCpuSetup, createSettings, safeStorage, KEYS, DEFAULT_CPU_SETUP, NAME_MAX_LENGTH,
+  sanitizeName, cleanName, truncateName, graphemes, normalizeCpuSetup, createSettings, safeStorage,
+  KEYS, DEFAULT_CPU_SETUP, NAME_MAX_LENGTH, NAME_MAX_CODEPOINTS,
 } from '../../public/assets/js/settings.js';
+
+// Gemeinsame Fälle mit tests/php/ValidateTest.php: Client und Server bereinigen gleich.
+const NAMES = JSON.parse(readFileSync(new URL('../fixtures/names.json', import.meta.url), 'utf8'));
 
 function memoryStorage() {
   const map = new Map();
@@ -23,7 +28,41 @@ test('sanitizeName: trimmt, entfernt Steuerzeichen, fasst Leerraum zusammen', ()
 
 test('sanitizeName: max. 20 Zeichen, Emojis zählen als ein Zeichen', () => {
   assert.equal(sanitizeName('x'.repeat(30)).length, NAME_MAX_LENGTH);
-  assert.equal(Array.from(sanitizeName('😀'.repeat(25))).length, NAME_MAX_LENGTH);
+  assert.equal(graphemes(sanitizeName('😀'.repeat(25))).length, NAME_MAX_LENGTH);
+});
+
+test('Namen (gemeinsame Fixtures): Grenzen wie der Server', () => {
+  assert.equal(NAMES.maxGraphemes, NAME_MAX_LENGTH);
+  assert.equal(NAMES.maxCodepoints, NAME_MAX_CODEPOINTS);
+  for (const [s, n] of NAMES.graphemeCounts) assert.equal(graphemes(s).length, n, s);
+});
+
+test('Namen (gemeinsame Fixtures): gültige Namen bereinigt wie rps_clean_name()', () => {
+  for (const c of NAMES.valid) {
+    assert.equal(sanitizeName(c.in), c.out, c.note);
+    assert.equal(cleanName(c.in), c.out, c.note);
+  }
+});
+
+test('Namen (gemeinsame Fixtures): zu lange Namen grapheme-sicher gekürzt', () => {
+  for (const c of NAMES.tooLong) assert.equal(sanitizeName(c.in), c.truncated, c.note);
+});
+
+test('Namen (gemeinsame Fixtures): nur Unsichtbares → leer', () => {
+  for (const s of NAMES.empty) assert.equal(sanitizeName(s), '', JSON.stringify(s));
+});
+
+test('truncateName ohne Intl.Segmenter: Codepoints, nie auf ZWJ/VS/Combining endend', () => {
+  const flag = '🏳\uFE0F\u200D🌈';
+  const cut = truncateName('x'.repeat(18) + flag, null); // 18 + 4 Codepoints → abgeschnitten nach „🏳\uFE0F“
+  assert.equal(cut, 'x'.repeat(18) + '🏳');
+  assert.doesNotMatch(truncateName('x'.repeat(19) + 'a\u0332', null), /[\p{M}\u200D]$/u);
+  assert.equal(truncateName('Bob', null), 'Bob');
+  for (const c of NAMES.tooLong) {
+    const t = truncateName(cleanName(c.in), null);
+    assert.ok(Array.from(t).length <= NAME_MAX_CODEPOINTS, c.note);
+    assert.doesNotMatch(t, /[\p{M}\u200D]$/u, c.note);
+  }
 });
 
 test('normalizeCpuSetup: gültige Werte bleiben, ungültige → Standard', () => {

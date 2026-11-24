@@ -11,21 +11,67 @@ export const KEYS = Object.freeze({
   insight: 'rps.insight',
 });
 
+/** Höchstlänge in Graphemen (sichtbaren Zeichen); dazu ein hartes Codepoint-Limit gegen Combining-Spam. */
 export const NAME_MAX_LENGTH = 20;
+export const NAME_MAX_CODEPOINTS = 80;
 export const DEFAULT_CPU_SETUP = Object.freeze({ level: 1, variant: 'classic', bestOf: 3 });
 
 const FLAG_ON = '1';
 const FLAG_OFF = '0';
-// Steuerzeichen (C0, DEL, C1) sowie Zeilen-/Absatztrenner; Leerraum wird vorher zu ' '
-const CONTROL_CHARS = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g;
 
-/** Name säubern: Steuerzeichen raus, Leerraum zusammenfassen, max. 20 Zeichen (Codepoints). */
-export function sanitizeName(raw) {
-  const cleaned = String(raw ?? '')
-    .replace(/\s+/g, ' ')
-    .replace(CONTROL_CHARS, '')
-    .trim();
-  return Array.from(cleaned).slice(0, NAME_MAX_LENGTH).join('').trim();
+// Gleiche Regeln wie rps_strip_invisible() in public/src/validate.php (gemeinsame Fälle: tests/fixtures/names.json).
+// PCRE [\s\p{Z}] mit /u umfasst zusätzlich NEL (U+0085) und U+180E – hier ausgeschrieben.
+const WHITESPACE = /[\t\n\v\f\r\u0085\u180E\p{Z}]/gu;
+const INVISIBLE = /[\u115F\u1160\u3164\uFFA0\u2800\u034F\u17B4\u17B5\u180E]/gu;
+const OTHER_EXCEPT_ZWJ = /[^\P{C}\u200D]/gu;  // Steuer-, Format- (u. a. Bidi), private Zeichen außer ZWJ
+const LONE_VS = /(^| )[\uFE00-\uFE0F]+/gu;     // Variation Selector ohne Basiszeichen
+const EMOJI = '\\u2300-\\u23FF\\u2600-\\u27BF\\u2B00-\\u2BFF\\u{1F000}-\\u{1FAFF}\\uFE0F';
+const LONE_ZWJ = new RegExp(`(?<![${EMOJI}])\\u200D|\\u200D(?![${EMOJI}])`, 'gu');
+const DANGLING_END = /[\p{M}\u200D]+$/u;  // Fallback-Kürzung endet nie auf ZWJ/Variation Selector/Combining
+
+const segmenter = typeof Intl === 'object' && typeof Intl.Segmenter === 'function'
+  ? new Intl.Segmenter('de', { granularity: 'grapheme' })
+  : null;
+
+/** Zerlegt in Grapheme (Intl.Segmenter); ohne Segmenter (seg = null) in Codepoints. */
+export function graphemes(s, seg = segmenter) {
+  const str = String(s ?? '');
+  return seg ? Array.from(seg.segment(str), (x) => x.segment) : Array.from(str);
+}
+
+/**
+ * Kürzt grapheme-sicher auf max. 20 Grapheme und 80 Codepoints; das erste Graphem, das nicht mehr
+ * passt, fällt samt Rest weg. Ohne Segmenter nach Codepoints, aber nie mit hängendem ZWJ/VS/Combining.
+ */
+export function truncateName(s, seg = segmenter) {
+  const out = [];
+  let codepoints = 0;
+  for (const g of graphemes(s, seg)) {
+    const n = Array.from(g).length;
+    if (out.length >= NAME_MAX_LENGTH || codepoints + n > NAME_MAX_CODEPOINTS) break;
+    out.push(g);
+    codepoints += n;
+  }
+  const joined = out.join('');
+  return seg ? joined : joined.replace(DANGLING_END, '');
+}
+
+/** Bereinigt wie der Server (NFC, Leerraum, Unsichtbares, ZWJ nur zwischen Emoji), ohne zu kürzen. */
+export function cleanName(raw) {
+  return String(raw ?? '')
+    .normalize('NFC')
+    .replace(WHITESPACE, ' ')
+    .replace(INVISIBLE, '')
+    .replace(OTHER_EXCEPT_ZWJ, '')
+    .replace(LONE_VS, '$1')
+    .replace(LONE_ZWJ, '')
+    .replace(/ {2,}/g, ' ')
+    .replace(/^ +| +$/g, '');
+}
+
+/** Name säubern und grapheme-sicher kürzen – das Ergebnis besteht die Serverprüfung unverändert. */
+export function sanitizeName(raw, seg = segmenter) {
+  return truncateName(cleanName(raw), seg).replace(/ +$/, '');
 }
 
 /** Ungültige/fehlende Felder durch Standardwerte ersetzen. */
