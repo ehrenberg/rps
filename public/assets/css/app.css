@@ -853,6 +853,87 @@ html[data-route="play"] .app, .app:has(.screen--arena) { max-width: var(--arena-
   .stage { min-height: 16rem; }
 }
 
+/* ───────── Handy quer: kompakte Arena ohne Scrollen (Hochformat/Desktop unverändert) ─────────
+   Links Anzeigetafel, Hände, Ergebnis, Reaktionen; rechts Menüleiste, Zugknöpfe, Verlauf. */
+@media (orientation: landscape) and (max-height: 31.25rem) {
+  :root { --header-h: var(--tap); }
+  .brand__mark { width: 1.8rem; height: 1.8rem; }
+  .app, html[data-route="play"] .app, .app:has(.screen--arena) { padding-top: var(--sp-2); padding-bottom: var(--sp-2); }
+  .screen { gap: var(--sp-3); }
+  .screen__head { margin-top: 0; }
+
+  .arena__main {
+    display: grid; align-items: start; gap: var(--sp-2) var(--sp-4);
+    grid-template-columns: minmax(0, 1fr) clamp(13rem, 36%, 17rem);
+    grid-template-areas:
+      "score     top"
+      "stage     moves"
+      "result    moves"
+      "info      moves"
+      "reactions history";
+    min-height: 0;
+  }
+  .arena__main > .scoreboard { grid-area: score; }
+  .arena__main > .arena__top { grid-area: top; align-self: center; }
+  .arena__main > .stage { grid-area: stage; }
+  .arena__main > .result { grid-area: result; }
+  .arena__main > .arena__info { grid-area: info; }
+  .arena__main > .moves { grid-area: moves; }
+  .arena__main > .history { grid-area: history; }
+  .arena__main > .reactions { grid-area: reactions; }
+
+  .arena__top .screen__back { width: var(--tap); padding: 0; margin-left: 0; }
+  .arena__top .screen__back-label, .arena__mode { display: none; }
+
+  .scoreboard { align-items: center; padding: var(--sp-2) var(--sp-3); border-radius: var(--radius); }
+  .player { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 0.15rem var(--sp-2); }
+  .player--opp { justify-content: flex-end; }
+  .player__name { font-size: 1.15rem; }
+  .pip { width: 0.95rem; height: 0.95rem; }
+  .commit { margin-top: 0; }
+
+  .stage {
+    width: auto; margin-inline: 0; min-height: 0;
+    padding: var(--sp-3) 0 0;
+  }
+  .stage__hand .hand { max-width: min(11rem, 36vh); }
+  .countdown { font-size: 4.5rem; }
+
+  .result { min-height: 2.75rem; }
+  .result__sentence { font-size: 1.5rem; }
+  .result__sub { font-size: var(--fs-xs); }
+  .arena__info { min-height: 0; }
+  .arena__info:empty, .arena__info:not(:has(> :not([hidden]))) { display: none; }
+
+  .moves { grid-template-columns: minmax(0, 1fr); margin-top: 0; }
+  .moves--five { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .moves--five .move-btn:last-child { grid-column: 1 / -1; }
+  .move-btn, .moves--five .move-btn {
+    flex-direction: row; justify-content: flex-start; gap: var(--sp-2);
+    min-height: 3.5rem; padding: var(--sp-1) var(--sp-3); border-radius: var(--radius);
+  }
+  .move-btn__icon, .moves--five .move-btn__icon { width: 2.3rem; height: 2.3rem; flex: none; }
+  .move-btn__name, .moves--five .move-btn__name { font-size: var(--fs-sm); }
+  .move-btn__key { top: 50%; transform: translateY(-50%); }
+  .moves--five .move-btn__key { display: none; }
+
+  .history { min-height: 0; justify-content: flex-start; }
+  .reactions { flex-wrap: nowrap; justify-content: flex-start; }
+
+  /* Matchende: kompakte Karte, bei Bedarf scrollbar statt abgeschnitten */
+  .overlay { overflow-y: auto; place-items: safe center; padding-block: calc(var(--header-h) + var(--sp-2)) var(--sp-2); }
+  .overlay__card { gap: var(--sp-2); width: min(100%, 30rem); padding: var(--sp-4) var(--sp-5); }
+  .overlay__emblem { font-size: 2.4rem; }
+  .overlay__title { font-size: 2.4rem; }
+  .overlay__score strong { font-size: 1.6rem; }
+  .overlay__actions { flex-direction: row; justify-content: center; margin-top: 0; }
+
+  /* Turnierbaum: weniger Kopf, Runden nebeneinander */
+  .bracket__role { padding: var(--sp-2) var(--sp-4); }
+  .champion { padding: var(--sp-4); }
+  .champion__cup { font-size: 3rem; }
+}
+
 /* ───────── Weniger Bewegung ───────── */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 1ms !important; animation-iteration-count: 1 !important; transition-duration: 1ms !important; scroll-behavior: auto !important; }
