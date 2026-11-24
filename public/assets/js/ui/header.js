@@ -22,7 +22,7 @@ export function mountHeader(container, { settings, prefs }) {
     calm.set(settings.getReducedFx());
   });
   container.replaceChildren(
-    h('a', { class: 'brand', href: hrefFor('home'), 'aria-label': 'Schere Stein Papier – zum Start' },
+    h('a', { class: 'brand', href: hrefFor('home'), 'aria-label': 'SSP – Schere Stein Papier, zum Start' },
       brandMark(), h('span', { class: 'brand__text', 'aria-hidden': 'true' }, 'SSP')),
     h('div', { class: 'header__actions' },
       sound.el, calm.el,

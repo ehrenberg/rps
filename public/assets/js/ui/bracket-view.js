@@ -30,24 +30,33 @@ function slotEl(slot) {
     slot.score !== null ? h('span', { class: 'slot__score' }, String(slot.score)) : null);
 }
 
+/** Vorlesetext je Platz: „Anna (du) 2, weiter“. */
+function slotText(s) {
+  if (!s.id) return s.placeholder;
+  return [s.name, s.me ? '(du)' : null, s.score !== null ? String(s.score) : null, s.won ? 'weiter' : null, s.left ? 'hat verlassen' : null]
+    .filter(Boolean).join(' ');
+}
+
 function matchEl(m) {
-  return h('li', { class: ['bmatch', `bmatch--${m.status}`, m.mine && 'bmatch--mine'], 'aria-label': `${m.label}: ${m.slots.map((s) => s.name ?? s.placeholder).join(' gegen ')}, ${STATUS_TEXT[m.status]}` },
+  return h('li', { class: ['bmatch', `bmatch--${m.status}`, m.mine && 'bmatch--mine'], 'aria-label': `${m.label}: ${m.slots.map(slotText).join(' gegen ')}, ${STATUS_TEXT[m.status]}${m.mine ? ', dein Match' : ''}` },
     h('div', { class: 'bmatch__head' }, h('span', {}, m.label), h('span', { class: `bmatch__badge bmatch__badge--${m.status}` }, STATUS_TEXT[m.status])),
     h('ol', { class: 'bmatch__slots' }, m.slots.map(slotEl)));
 }
 
 /**
  * @param {{ state, me, onReact:(emoji)=>void, onRestart:()=>Promise|void, onPlay:()=>void, onLeave:()=>void,
- *           celebration?:{ done(key:string):boolean, mark(key:string):void } }} o
+ *           announce?:(text:string)=>void, celebration?:{ done(key:string):boolean, mark(key:string):void } }} o
  *   celebration: merkt sich (pro Raum, über Reloads hinweg) die schon gefeierten Turniere
  */
-export function bracketView({ state: initial, me, onReact, onRestart, onPlay, onLeave, celebration = memoryCelebration() }) {
+export function bracketView({ state: initial, me, onReact, onRestart, onPlay, onLeave, announce = null, celebration = memoryCelebration() }) {
   const { el, body, heading } = screenLayout({
     id: 'bracket', title: 'Turnier',
     subtitle: `${VARIANT_NAMES[initial.variant]} · Best of ${initial.bestOf}`,
   });
-  const role = h('div', { class: 'bracket__role glass', role: 'status' });
-  const tree = h('div', { class: 'bracket', tabindex: '0', 'aria-label': 'Turnierbaum (seitlich scrollbar)' });
+  // Kein role=status: der Inhalt wird bei jeder Zustandsversion neu gebaut; Änderungen der Rolle werden einzeln angesagt.
+  const role = h('div', { class: 'bracket__role glass' });
+  let lastRole = tournamentRole(initial, me);
+  const tree = h('div', { class: 'bracket', role: 'region', tabindex: '0', 'aria-label': 'Turnierbaum (seitlich scrollbar)' });
   const reactions = reactionBar({ onReact }).el;
   const champion = h('div', { class: 'champion', hidden: true });
   const leave = h('button', { type: 'button', class: 'btn btn--ghost', onclick: onLeave }, icon('door', { size: 18 }), 'Turnier verlassen');
@@ -59,8 +68,12 @@ export function bracketView({ state: initial, me, onReact, onRestart, onPlay, on
 
   function update(state) {
     lastState = state;
+    // Neu gebaute Buttons (Zu deinem Match / Neues Turnier) übernehmen den Fokus – kein Fokusverlust beim Polling.
+    const refocus = [role, champion].find((c) => c.contains(document.activeElement));
     const b = buildBracket(state, me);
     const r = tournamentRole(state, me);
+    if (r !== lastRole && r !== 'champion') announce?.(ROLE_TEXT[r]);
+    lastRole = r;
     replaceChildren(role,
       h('p', { class: 'bracket__role-text' }, ROLE_TEXT[r]),
       r === 'playing' ? h('button', { type: 'button', class: 'btn btn--primary', onclick: onPlay }, icon('duel', { size: 18 }), 'Zu deinem Match') : null);
@@ -87,11 +100,13 @@ export function bracketView({ state: initial, me, onReact, onRestart, onPlay, on
           : h('p', { class: 'muted' }, 'Der Host kann ein neues Turnier mit allen starten.'));
       const key = tournamentKey(state);
       if (b.champion && !celebration.done(key)) {
+        announce?.(b.champion.id === me ? 'Du hast das Turnier gewonnen!' : `${b.champion.name} gewinnt das Turnier!`);
         celebration.mark(key);
         fx.confetti({});
         audio.play(b.champion.id === me ? 'matchWin' : 'win');
       }
     }
+    if (refocus) (refocus.querySelector('button:not([disabled])') ?? heading).focus({ preventScroll: true });
   }
   update(initial);
   return { el, focus: () => heading.focus({ preventScroll: true }), update, dispose() {} };

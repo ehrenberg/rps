@@ -37,3 +37,10 @@ test('hrefFor ist die Umkehrung von parseHash', () => {
   assert.throws(() => hrefFor('room', { code: 'nope' }));
   assert.throws(() => hrefFor('unbekannt'));
 });
+
+test('In-Page-Anker wie "#app" (Skip-Link) sind weder Route noch Raum', () => {
+  // main.js erkennt notFound + vorhandenes Element mit dieser ID als Sprungziel und behält den Screen.
+  for (const anchor of ['#app', '#app-header', '#cpu-title']) {
+    assert.equal(parseHash(anchor).name, 'notFound', anchor);
+  }
+});

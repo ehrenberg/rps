@@ -1,0 +1,5 @@
+# rps.bastianswelt.de – alles erlaubt außer Server-Interna
+User-agent: *
+Disallow: /api.php
+Disallow: /src/
+Disallow: /data/

@@ -25,6 +25,10 @@ const NONCE_PREVIEW_CHARS = 8;
 const SHAKE_INTENSITY = Object.freeze({ win: 1, lose: 0.7, draw: 0.4 });
 
 const STATUS_TEXT = Object.freeze({ choosing: 'wählt …', ready: 'bereit ✓', offline: 'offline', left: 'hat verlassen' });
+// Nur wichtige Statuswechsel vorlesen („wählt …“ käme jede Runde und wäre zu geschwätzig).
+const STATUS_ANNOUNCE = Object.freeze({
+  ready: (opp) => `${opp} hat gewählt.`, offline: (opp) => `${opp} ist offline.`, left: (opp) => `${opp} hat das Spiel verlassen.`,
+});
 const OUTCOME_KEY = Object.freeze({ 1: 'win', 0: 'draw', [-1]: 'lose' });
 const OUTCOME_TEXT = Object.freeze({ 1: 'Runde für dich!', 0: 'Unentschieden – zählt nicht.', [-1]: 'Runde für den Gegner.' });
 const SPRING_KEYFRAMES = [
@@ -110,7 +114,9 @@ export function createArenaView(opts) {
   const moves = h('div', { class: 'moves', role: 'group', 'aria-label': 'Dein Zug' });
   const history = h('ol', { class: 'history', 'aria-label': 'Rundenverlauf' });
   const reactions = reactionBar({ onReact: opts.onReact, hidden: true }).el;
-  const deadline = h('p', { class: 'deadline', hidden: true, role: 'status' });
+  // Kein Live-Bereich: der Text zählt sekündlich herunter; angesagt wird nur der Start einer Frist.
+  const deadline = h('p', { class: 'deadline', hidden: true });
+  let deadlineWho = null;
   const claimBtn = h('button', { type: 'button', class: 'btn btn--danger claim', hidden: true, onclick: () => opts.onClaim?.() }, icon('trophy', { size: 18 }), 'Sieg beanspruchen');
   const leaveBtn = opts.onLeave
     ? h('button', { type: 'button', class: 'btn btn--ghost arena__leave', onclick: () => opts.onLeave() }, icon('door', { size: 18 }), h('span', {}, 'Verlassen'))
@@ -161,9 +167,11 @@ export function createArenaView(opts) {
   function setDeadline(seconds, who = 'reveal') {
     clearInterval(deadlineTimer);
     deadline.hidden = seconds === null || seconds === undefined;
-    if (deadline.hidden) return;
+    if (deadline.hidden) { deadlineWho = null; return; }
     let left = seconds;
     const text = DEADLINE_TEXT[who] ?? DEADLINE_TEXT.reveal;
+    if (deadlineWho !== who) announce(text(oppName, left).replace('⏳ ', ''));
+    deadlineWho = who;
     deadline.classList.toggle('deadline--mine', who === 'commit');
     const render = () => { deadline.textContent = text(oppName, left); };
     render();
@@ -275,6 +283,8 @@ export function createArenaView(opts) {
     },
 
     setOpponentStatus(state) {
+      const say = STATUS_ANNOUNCE[state];
+      if (say && oppStatus.dataset.state && oppStatus.dataset.state !== state) announce(say(oppName));
       oppStatus.textContent = STATUS_TEXT[state] ?? '';
       oppStatus.dataset.state = state;
     },
@@ -288,7 +298,6 @@ export function createArenaView(opts) {
       handMe.setMove('fist', { pop: false });
       handOpp.setMove('fist', { pop: false });
       stage.classList.add('stage--countdown');
-      announce(COUNTDOWN_WORDS.join(' '));
       // Wörter + Sound exakt auf den Aufschlägen der Faust (onBeat); resolved beim letzten = Reveal.
       const onBeat = (i) => {
         audio.play('shake');

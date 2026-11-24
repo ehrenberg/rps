@@ -96,12 +96,20 @@ export function nameInput({ settings, id = 'player-name', label = 'Dein Name', o
 /** Bestätigungsdialog (<dialog>), löst mit true/false auf. */
 export function confirmDialog({ title, text, confirmLabel = 'OK', cancelLabel = 'Abbrechen', danger = false }) {
   return new Promise((resolve) => {
-    const dialog = h('dialog', { class: 'dialog glass', 'aria-labelledby': 'dialog-title' },
+    const dialog = h('dialog', { class: 'dialog glass', 'aria-labelledby': 'dialog-title', 'aria-describedby': 'dialog-text' },
       h('h2', { class: 'dialog__title', id: 'dialog-title' }, title),
-      h('p', { class: 'dialog__text' }, text),
+      h('p', { class: 'dialog__text', id: 'dialog-text' }, text),
       h('div', { class: 'dialog__actions' },
         h('button', { type: 'button', class: 'btn btn--ghost', value: 'cancel', onclick: () => dialog.close('cancel') }, cancelLabel),
         h('button', { type: 'button', class: ['btn', danger ? 'btn--danger' : 'btn--primary'], onclick: () => dialog.close('ok') }, confirmLabel)));
+    // Fokusfalle: Tab wechselt nur zwischen den Buttons (Escape schließt nativ → Abbrechen).
+    dialog.addEventListener('keydown', (e) => {
+      if (e.key !== 'Tab') return;
+      const buttons = [...dialog.querySelectorAll('button')];
+      const i = buttons.indexOf(document.activeElement);
+      e.preventDefault();
+      buttons[(i + (e.shiftKey ? -1 : 1) + buttons.length) % buttons.length].focus();
+    });
     dialog.addEventListener('close', () => { dialog.remove(); resolve(dialog.returnValue === 'ok'); });
     document.body.append(dialog);
     dialog.showModal();

@@ -5,6 +5,7 @@ import * as audio from './audio.js';
 import * as fx from './fx.js';
 import { mountHeader } from './ui/header.js';
 import { prefersLessMotion } from './ui/dom.js';
+import { initToasts } from './ui/toast.js';
 import * as home from './ui/home.js';
 import * as cpuSetup from './ui/cpu-setup.js';
 import * as arenaScreen from './ui/arena-screen.js';
@@ -77,15 +78,30 @@ function navigate(href) {
 // ─── Routing & Screen-Wechsel ───
 let current = null;
 let firstRender = true;
+let lastHash = location.hash;
+
+/** Sprungziel im Dokument (z. B. Skip-Link „#app“) fokussieren, ohne den Screen neu aufzubauen. */
+function focusTarget(target) {
+  if (!target.hasAttribute('tabindex')) target.setAttribute('tabindex', '-1');
+  target.focus();
+}
 
 function render() {
   const route = parseHash(location.hash);
+  // In-Page-Anker (#app …) sind keine Route: laufenden Screen behalten, Hash zurücksetzen.
+  const anchor = route.name === 'notFound' ? document.getElementById(location.hash.slice(1)) : null;
+  if (anchor && current) {
+    history.replaceState(null, '', lastHash || hrefFor('home'));
+    focusTarget(anchor);
+    return;
+  }
   if (route.name === 'notFound') {
     history.replaceState(null, '', hrefFor('home'));
     render();
     return;
   }
   const screen = SCREENS[route.name];
+  lastHash = location.hash;
   current?.dispose?.();
   fx.clear?.();
   const next = screen.render({ settings, prefs, announce, navigate, params: route.params });
@@ -134,7 +150,16 @@ function playClick(e) {
   }
 }
 
+/** Skip-Link springt per Fokus statt per Hash – sonst würde der Router den Screen wechseln. */
+function onSkipLink(e) {
+  e.preventDefault();
+  focusTarget(app);
+  app.scrollIntoView?.({ block: 'start' });
+}
+
 function init() {
+  document.querySelector('.skip-link')?.addEventListener('click', onSkipLink);
+  initToasts();
   applyReducedFx();
   reducedMotionQuery?.addEventListener?.('change', applyReducedFx);
   fx.initFx(document.getElementById('fx'));
