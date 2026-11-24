@@ -6,6 +6,7 @@ import { shareCard } from './share.js';
 import { handIcon } from '../hands.js';
 import { VARIANT_NAMES } from '../rules.js';
 import { singleFlight } from '../throttle.js';
+import { hrefFor } from '../router.js';
 
 export const MIN_TOURNAMENT_PLAYERS = 3;
 export const MAX_TOURNAMENT_PLAYERS = 16;
@@ -19,11 +20,47 @@ function waitingAnimation(text) {
     h('p', { class: 'waiting__text' }, text, h('span', { class: 'waiting__dots', 'aria-hidden': 'true' }, h('i'), h('i'), h('i'))));
 }
 
+/** Hinweis: Warten muss man nicht hier – das Spiel bleibt unter „Meine Spiele“. */
+function awayNote(isDuel) {
+  return h('div', { class: 'lobby__away' },
+    icon('bell', { size: 20 }),
+    h('div', {},
+      h('p', {}, `Du kannst die Seite verlassen – wir sagen Bescheid, ${isDuel ? 'wenn jemand beitritt' : 'wenn dein Match beginnt'}. Deine Spiele findest du unter „Meine Spiele“.`),
+      h('a', { class: 'btn btn--ghost lobby__games', href: hrefFor('games') }, icon('games', { size: 20 }), 'Meine Spiele')));
+}
+
+/** Einmaliges Angebot für System-Benachrichtigungen (Erlaubnis nur per Klick anfragen). */
+function notifyOffer(notifier, isDuel) {
+  if (!notifier?.shouldOfferHint()) return null;
+  const box = h('section', { class: 'notify-offer glass', 'aria-labelledby': 'notify-offer-title' });
+  const done = (text) => {
+    const msg = h('p', { class: 'notify-offer__done', tabindex: '-1' }, text);
+    replaceChildren(box, msg);
+    msg.focus({ preventScroll: true });
+  };
+  const yes = h('button', {
+    type: 'button', class: 'btn btn--primary',
+    onclick: async () => {
+      yes.disabled = true;
+      const result = await notifier.enable();
+      done(result === 'granted'
+        ? 'Alles klar – du bekommst eine Benachrichtigung, auch wenn der Tab im Hintergrund ist.'
+        : 'Benachrichtigungen sind im Browser blockiert. Du siehst Neuigkeiten trotzdem hier in der App.');
+    },
+  }, icon('bell'), 'Ja, benachrichtigen');
+  const no = h('button', { type: 'button', class: 'btn btn--ghost', onclick: () => { notifier.dismissHint(); done('Okay – du kannst das jederzeit in den Einstellungen ändern.'); } }, 'Nein, danke');
+  box.append(
+    h('h2', { class: 'notify-offer__title', id: 'notify-offer-title' }, `Soll ich dich benachrichtigen, wenn ${isDuel ? 'jemand beitritt' : 'dein Match beginnt'}?`),
+    h('p', { class: 'muted' }, 'Klappt auch, wenn der Tab im Hintergrund ist. Dein Browser fragt einmal nach.'),
+    h('div', { class: 'notify-offer__actions' }, yes, no));
+  return box;
+}
+
 /**
- * @param {{ state, me, code, onStart:()=>Promise|void, onLeave:()=>void, announce?:(text:string)=>void }} o
+ * @param {{ state, me, code, onStart:()=>Promise|void, onLeave:()=>void, announce?:(text:string)=>void, notifier? }} o
  * @returns {{ el, focus, update(state), dispose }}
  */
-export function lobbyView({ state: initial, me, code, onStart, onLeave, announce = null }) {
+export function lobbyView({ state: initial, me, code, onStart, onLeave, announce = null, notifier = null }) {
   const isDuel = initial.type === 'duel';
   const { el, body, heading } = screenLayout({
     id: 'lobby',
@@ -39,7 +76,7 @@ export function lobbyView({ state: initial, me, code, onStart, onLeave, announce
   const list = h('ul', { class: 'players', 'aria-label': 'Spieler' });
   const listPanel = h('section', { class: 'panel glass' }, h('h2', { class: 'panel__title' }, 'Spieler'), list);
   const leave = h('button', { type: 'button', class: 'btn btn--ghost', onclick: onLeave }, icon('door', { size: 18 }), 'Raum verlassen');
-  body.append(...[status, share, isDuel ? null : listPanel, h('div', { class: 'lobby__footer' }, leave)].filter(Boolean));
+  body.append(...[status, awayNote(isDuel), notifyOffer(notifier, isDuel), share, isDuel ? null : listPanel, h('div', { class: 'lobby__footer' }, leave)].filter(Boolean));
   let lastState = initial;
   // „Turnier starten“ nur einmal anfragen, bis die Antwort da ist
   const start = singleFlight(() => onStart(), { onChange: () => update(lastState) });
