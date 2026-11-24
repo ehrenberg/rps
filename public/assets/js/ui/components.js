@@ -1,7 +1,7 @@
 // Wiederverwendbare Bausteine: Screen-Gerüst, Schalter, Auswahlgruppe, Namensfeld, Bestätigung.
 import { h } from './dom.js';
 import { icon } from './icons.js';
-import { NAME_MAX_LENGTH } from '../settings.js';
+import { truncateName } from '../settings.js';
 
 /**
  * Einheitliches Screen-Gerüst: optionaler Zurück-Link, Überschrift (fokussierbar), Untertitel.
@@ -78,14 +78,24 @@ export function choiceGroup({ label, name, options, value, onChange, columns = o
   return { el: h('fieldset', { class: 'field' }, h('legend', { class: 'field__label' }, label), group), select };
 }
 
-/** Namensfeld (rps.name), speichert beim Tippen. */
+/**
+ * Namensfeld (rps.name), speichert beim Tippen. Kein maxlength (zählt UTF-16-Einheiten und zerschneidet
+ * Emoji wie 🏳️‍🌈): stattdessen grapheme-sicher auf 20 Zeichen kürzen, sobald die Eingabe fertig ist.
+ */
 export function nameInput({ settings, id = 'player-name', label = 'Dein Name', onChange }) {
   const input = h('input', {
-    id, class: 'input', type: 'text', maxlength: String(NAME_MAX_LENGTH), autocomplete: 'nickname',
+    id, class: 'input', type: 'text', autocomplete: 'nickname',
     placeholder: 'z. B. Anna', spellcheck: 'false', enterkeyhint: 'done',
   });
   input.value = settings.getName();
-  input.addEventListener('input', () => onChange?.(settings.setName(input.value)));
+  input.addEventListener('input', (e) => {
+    if (!e.isComposing) {
+      const limited = truncateName(input.value);
+      if (limited !== input.value) input.value = limited;
+    }
+    const name = settings.setName(input.value); // nicht in onChange?.() – das wertet ohne onChange nichts aus
+    onChange?.(name);
+  });
   input.addEventListener('change', () => { input.value = settings.setName(input.value); });
   const el = h('div', { class: 'field field--name' },
     h('label', { class: 'field__label', for: id }, label),

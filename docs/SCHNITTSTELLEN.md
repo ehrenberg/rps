@@ -178,8 +178,14 @@ Warteschlange); `proof` = Gegner-Zug/Nonce/Hash aus `history`, damit der Control
 - `router.js`: `parseHash(hash) → { name, params }`, `hrefFor(name, params)`, `ROUTES`, `ROOM_CODE_RE`.
   Routen: `#/` home, `#/cpu`, `#/play`, `#/stats`, `#/settings`, `#/duel`, `#/tournament`, `#k7f3qa` room.
 - `settings.js`: `createSettings(storage)` → `get/setName`, `get/setReducedFx`, `get/setInsight`,
-  `get/setCpuSetup`; `sanitizeName`, `normalizeCpuSetup`, `safeStorage`. Schlüssel: `rps.name`,
-  `rps.reducedFx`, `rps.insight`, `rps.cpuSetup.v1`.
+  `get/setCpuSetup`; `sanitizeName`, `cleanName`, `truncateName`, `graphemes`, `normalizeCpuSetup`,
+  `safeStorage`. Schlüssel: `rps.name`, `rps.reducedFx`, `rps.insight`, `rps.cpuSetup.v1`.
+  **Namensregel (Client = Server):** NFC; jeder Leerraum (inkl. NEL, U+180E, `\p{Z}`) → ein Leerzeichen;
+  unsichtbare Füllzeichen, `\p{C}` (Steuer-, Format- inkl. Bidi U+202A–202E/U+2066–2069) raus;
+  ZWJ nur zwischen Emoji, Variation Selector nur nach einem Zeichen; trimmen. Länge: 1–20 **Grapheme**
+  (Intl.Segmenter bzw. PCRE `\X` mit Emoji-Folgen-Korrektur) und höchstens 80 Codepoints.
+  Der Client kürzt grapheme-sicher (kein `maxlength`), der Server lehnt Längeres mit 400 ab.
+  Gemeinsame Testfälle: `tests/fixtures/names.json` (JS- und PHP-Tests).
 
 ### Screens (`ui/`)
 Jeder Screen exportiert `title` und `render(ctx) → { el, focus?, dispose? }`;

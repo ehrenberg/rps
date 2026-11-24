@@ -288,7 +288,7 @@ Weitere lokale Schlüssel: `rps.name`, `rps.sound`, `rps.reducedFx`, `rps.ai.his
 
 ## Sicherheit
 
-- Eingaben validieren: Name 1–20 Zeichen (Unicode, getrimmt, Steuerzeichen raus), Emoji nur aus Liste, `move` nur aus Variante, `hash` = 64 hex, `nonce` = 32 hex.
+- Eingaben validieren: Name 1–20 Grapheme und ≤ 80 Codepoints (Unicode, getrimmt, Steuer-/Bidi-/unsichtbare Zeichen raus; Regel s. SCHNITTSTELLEN.md `settings.js`), Emoji nur aus Liste, `move` nur aus Variante, `hash` = 64 hex, `nonce` = 32 hex.
 - Ausgabe im Client immer per `textContent`, nie `innerHTML` mit Nutzertext.
 - `.htaccess`: `Content-Security-Policy: default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'`, `Referrer-Policy: no-referrer`, `X-Content-Type-Options: nosniff`, `Permissions-Policy` restriktiv.
 - `src/` und `data/` per `.htaccess` gesperrt (`Require all denied`), zusätzlich leere `index.html`.
