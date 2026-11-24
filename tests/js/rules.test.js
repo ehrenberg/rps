@@ -1,8 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  MOVES, VARIANTS, beats, outcome, verb, resultSentence, countersOf, targetWins, isValidMove,
+  MOVES, VARIANTS, beats, outcome, verb, resultSentence, countersOf, targetWins, isValidMove, REACTIONS,
 } from '../../public/assets/js/rules.js';
+import { readFileSync } from 'node:fs';
 
 test('klassisch: jeder Zug schlägt genau einen und verliert gegen genau einen', () => {
   for (const m of VARIANTS.classic) {
@@ -41,4 +42,13 @@ test('countersOf / targetWins / isValidMove', () => {
   assert.ok(isValidMove('lizard', 'spock'));
   assert.ok(!isValidMove('classic', 'spock'));
   assert.ok(!isValidMove('foo', 'rock'));
+});
+
+test('REACTIONS entsprechen genau der PHP-Whitelist (validate.php)', () => {
+  const php = readFileSync(new URL('../../public/src/validate.php', import.meta.url), 'utf8');
+  const line = php.match(/const RPS_EMOJIS = \[(.*?)\];/);
+  assert.ok(line, 'RPS_EMOJIS in validate.php gefunden');
+  const phpList = [...line[1].matchAll(/'([^']+)'/g)].map((m) => m[1]);
+  assert.deepEqual([...REACTIONS], phpList);
+  assert.ok(Object.isFrozen(REACTIONS));
 });

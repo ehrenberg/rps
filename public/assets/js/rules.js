@@ -24,6 +24,9 @@ export const MOVE_NAMES = Object.freeze({
 
 export const BEST_OF = Object.freeze([3, 5]);
 
+/** Erlaubte Reaktionen – Spiegel der Whitelist RPS_EMOJIS in public/src/validate.php. */
+export const REACTIONS = Object.freeze(['👍', '😂', '😱', '🔥', '😭', '🤝', '👏', '😈']);
+
 /** Gewinner → { Verlierer: Verb } */
 const VERBS = Object.freeze({
   scissors: { paper: 'schneidet', lizard: 'köpft' },

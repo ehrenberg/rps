@@ -17,6 +17,7 @@
 // @property {(emoji:string) => void} sendReaction          nur wenn features.reactions
 // @property {() => void} dispose                          Timer/Polling beenden
 // @property {() => Promise} [claim]                       optional: Sieg beanspruchen (online)
+// @property {(recordId:string) => void} [markRecorded]    optional: Match ist in der Statistik gezählt
 //
 // Ereignisse Adapter → Controller (type, payload):
 //   matchStart     { variant, bestOf, target, oppName, oppDetail?, series?, score?, history? }
@@ -28,8 +29,11 @@
 //   roundResolved  { number, myMove, oppMove, outcome: 1|0|-1, result: 'w'|'d'|'l',
 //                    sentence, score: [ich, Gegner], proof: {hash, move, nonce}|null, forfeit? }
 //   insight        { text }                       „Was denkt der Computer?“ (Stufe 4)
+//   opponentCommit { hash }                       Gegner hat gewählt, sein Hash (online, vorab)
 //   matchOver      { winner: 'me'|'opp'|null, score, reason: 'score'|'forfeit'|'leave'|'claim'|…,
-//                    replay?, oppName?, series? }   replay: schon vorher beendet → keine Statistik
+//                    replay?, recordId?, oppName?, series? }
+//                  replay: schon gezählt → keine Statistik; recordId → adapter.markRecorded(recordId)
+//                  winner null: kein Sieger (beide weg) → neutral, keine Statistik
 //   reaction       { emoji, fromMe }                                     sofort
 //   error          { message, fatal? }                                   sofort
 //   deadline       { seconds|null, who: 'reveal'|'commit'|'oppCommit'|null }  laufende Frist   sofort
@@ -44,23 +48,26 @@
 //   setup({ variant, bestOf, target, moves, oppName, oppDetail, features })
 //   setRoundOpen({ round, commit })        Buttons aktiv, Commit-Badge zeigen
 //   setChosen(move)                        Buttons sperren, Wahl markieren
+//   setMovesEnabled(enabled)               Buttons frei/gesperrt (z. B. nach Commit-Fehler wieder frei)
 //   setOpponentStatus(state)
 //   playCountdown() → Promise
 //   reveal(round) → Promise                Hände, Zusammenprall, Ergebnissatz
 //   setScore(score, { scorer: 'me'|'opp'|null })
 //   addHistory(round)
-//   setFairness({ ok: boolean, proof })
+//   setFairness({ ok: boolean, proof, reason: null|'hash'|'shown'|'own' })
 //   setInsight(text)
 //   showReaction({ emoji, fromMe })
-//   showMatchOver({ won, score, reason }) → Promise
+//   showMatchOver({ won: boolean|null, score, reason, oppName?, series?, rematch? }) → Promise
+//                                          won null = kein Sieger; rematch = letzter rematchStatus
 //   hideMatchOver()
 //   showError(message)
 //   optional (online): setDeadline(seconds|null, who), setClaimAvailable(bool), setRematchStatus(info),
-//   setSeries(series|null)
+//   setSeries(series|null), setOpponentCommit(hash)
 // ───────────────────────────────────────────────────────────────────────────────────────────
 
 import { movesFor, isValidMove } from './rules.js';
 import { verifyCommit } from './crypto.js';
+import { singleFlight } from './throttle.js';
 
 /** Ereignisse, die nicht auf laufende Animationen warten. */
 const IMMEDIATE_EVENTS = new Set(['opponentStatus', 'reaction', 'error', 'deadline', 'claimAvailable', 'rematchStatus']);
@@ -73,18 +80,6 @@ export const PHASE = Object.freeze({
   OVER: 'over',
 });
 
-/** Tastenkürzel: Ziffern 1–n in Zugreihenfolge, dazu feste Buchstaben. */
-export const MOVE_LETTERS = Object.freeze({ rock: 's', paper: 'p', scissors: 'c', lizard: 'e', spock: 'k' });
-
-/** Taste → Zug der Variante oder null. */
-export function moveForKey(key, variant) {
-  const moves = movesFor(variant);
-  const k = String(key).toLowerCase();
-  const index = Number.parseInt(k, 10);
-  if (String(index) === k && index >= 1 && index <= moves.length) return moves[index - 1];
-  return moves.find((m) => MOVE_LETTERS[m] === k) ?? null;
-}
-
 /**
  * @param {{ adapter: OpponentAdapter, view: ArenaView,
  *           stats?: { recordRound: Function, recordMatch: Function },
@@ -95,7 +90,11 @@ export function createArenaController({ adapter, view, stats = null, verify = ve
   let phase = PHASE.WAITING;
   let disposed = false;
   let queue = Promise.resolve();
+  let restoredSinceChoice = false; // Server hat den Zug bestätigt, während der Commit noch lief
+  let rematchInfo = null; // letzter rematchStatus (kommt sofort, das Overlay erst nach der Animation)
   const listeners = new Set();
+  const showError = (err) => { if (!disposed) view.showError(err?.message ?? String(err)); };
+  const claimOnce = singleFlight(() => adapter.claim());
 
   const setPhase = (next) => {
     phase = next;
@@ -116,6 +115,7 @@ export function createArenaController({ adapter, view, stats = null, verify = ve
       setPhase(PHASE.CHOOSING);
     },
     moveRestored(p) {
+      restoredSinceChoice = true;
       setPhase(PHASE.SUBMITTED);
       view.setChosen(p.move);
     },
@@ -131,21 +131,29 @@ export function createArenaController({ adapter, view, stats = null, verify = ve
       view.addHistory(round);
       stats?.recordRound({ result: round.result, move: round.myMove });
       if (round.proof) {
-        const { hash, move, nonce } = round.proof;
-        const ok = await verify(hash, move, nonce);
-        if (!disposed) view.setFairness({ ok, proof: round.proof });
+        const reason = await fairnessProblem(round.proof);
+        if (!disposed) view.setFairness({ ok: reason === null, reason, proof: round.proof });
       }
       setPhase(PHASE.WAITING);
     },
     insight(p) {
       view.setInsight(p.text);
     },
+    opponentCommit(p) {
+      view.setOpponentCommit?.(p.hash);
+    },
     async matchOver(p) {
       setPhase(PHASE.OVER);
-      const won = p.winner === 'me';
-      if (!p.replay) stats?.recordMatch({ mode: adapter.info.statsMode, result: won ? 'w' : 'l' });
+      // winner null: kein Sieger (z. B. beide gegangen) → neutral, zählt nicht
+      const won = p.winner === null || p.winner === undefined ? null : p.winner === 'me';
+      if (!p.replay && won !== null && stats) {
+        stats.recordMatch({ mode: adapter.info.statsMode, result: won ? 'w' : 'l' });
+        if (p.recordId) adapter.markRecorded?.(p.recordId);
+      }
       view.setSeries?.(p.series ?? null);
-      await view.showMatchOver({ won, score: p.score, reason: p.reason, oppName: p.oppName, series: p.series ?? null });
+      await view.showMatchOver({
+        won, score: p.score, reason: p.reason, oppName: p.oppName, series: p.series ?? null, rematch: rematchInfo,
+      });
     },
     opponentStatus(p) {
       view.setOpponentStatus(p.state);
@@ -158,20 +166,33 @@ export function createArenaController({ adapter, view, stats = null, verify = ve
     },
     deadline(p) { view.setDeadline?.(p.seconds, p.who); },
     claimAvailable(p) { view.setClaimAvailable?.(p.available); },
-    rematchStatus(p) { view.setRematchStatus?.(p); },
+    rematchStatus(p) { rematchInfo = p; view.setRematchStatus?.(p); },
   };
+
+  /**
+   * null = fair; sonst Grund: 'hash' (Zug/Nonce ergeben nicht den Hash), 'shown' (Hash weicht vom
+   * vorher gezeigten ab), 'own' (Server hat für meinen Zug einen anderen Hash).
+   */
+  async function fairnessProblem({ hash, move, nonce, shownHash = null, ownHashOk = null }) {
+    if (!(await verify(hash, move, nonce))) return 'hash';
+    if (shownHash && shownHash !== hash) return 'shown';
+    if (ownHashOk === false) return 'own';
+    return null;
+  }
 
   function onEvent(type, payload) {
     if (disposed) return;
     const handler = handlers[type];
     if (!handler) return;
+    // Neues Match: alter Revanche-Status gilt nicht mehr (sofort, da rematchStatus sofort kommt)
+    if (type === 'matchStart') rematchInfo = null;
     if (IMMEDIATE_EVENTS.has(type)) {
       handler(payload);
       return;
     }
     queue = queue
       .then(() => (disposed ? undefined : handler(payload)))
-      .catch((err) => { if (!disposed) view.showError(err?.message ?? String(err)); });
+      .catch(showError);
   }
 
   return {
@@ -188,12 +209,17 @@ export function createArenaController({ adapter, view, stats = null, verify = ve
     /** Spieler wählt einen Zug. Gibt false zurück, wenn gerade nicht gewählt werden darf. */
     choose(move) {
       if (disposed || phase !== PHASE.CHOOSING || !isValidMove(variant, move)) return false;
+      restoredSinceChoice = false;
       setPhase(PHASE.SUBMITTED);
       view.setChosen(move);
       Promise.resolve(adapter.submitMove(move)).catch((err) => {
         if (disposed) return;
-        view.showError(err?.message ?? String(err));
+        showError(err);
+        // Nur zurück zur Wahl, wenn inzwischen nichts anderes passiert ist (z. B. moveRestored,
+        // weil der Server den Zug doch hat) – dann auch die Buttons wieder freigeben.
+        if (phase !== PHASE.SUBMITTED || restoredSinceChoice) return;
         setPhase(PHASE.CHOOSING);
+        view.setMovesEnabled(true);
       });
       return true;
     },
@@ -204,15 +230,15 @@ export function createArenaController({ adapter, view, stats = null, verify = ve
       Promise.resolve(adapter.rematch()).catch((err) => {
         if (disposed) return;
         setPhase(PHASE.OVER);
-        view.showError(err?.message ?? String(err));
+        showError(err);
       });
       return true;
     },
 
-    /** Sieg beanspruchen (nur Adapter mit claim). */
+    /** Sieg beanspruchen (nur Adapter mit claim); während der Anfrage keine zweite. */
     claim() {
       if (disposed || !adapter.claim) return;
-      Promise.resolve(adapter.claim()).catch((err) => view.showError(err?.message ?? String(err)));
+      claimOnce()?.catch(showError);
     },
 
     react(emoji) {

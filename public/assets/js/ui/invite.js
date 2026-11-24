@@ -7,6 +7,7 @@ import { VARIANTS, VARIANT_NAMES } from '../rules.js';
 import { handIcon } from '../hands.js';
 import { api } from '../net.js';
 import { hrefFor } from '../router.js';
+import { inviteErrorKind, closedInviteText } from '../room-flow.js';
 
 function headline(info) {
   const host = info.hostName ?? 'Jemand';
@@ -30,7 +31,6 @@ function facts(info) {
  */
 export function inviteView({ code, settings, onJoined, announce = null }) {
   const { el, body, heading } = screenLayout({ id: 'invite', title: 'Einladung', subtitle: `Raum ${code}` });
-  replaceChildren(body, h('div', { class: 'invite glass invite--loading' }, h('div', { class: 'spinner', 'aria-hidden': 'true' }), h('p', {}, 'Einladung wird geladen …')));
   let disposed = false;
 
   async function join(info, nameField, btn) {
@@ -65,7 +65,7 @@ export function inviteView({ code, settings, onJoined, announce = null }) {
         facts(info),
         info.names?.length ? h('p', { class: 'invite__names' }, `Dabei: ${info.names.join(', ')}`) : null,
         info.spectate && !info.joinable ? h('p', { class: 'muted' }, 'Das Turnier läuft schon – du kannst zuschauen und mitfiebern.') : null,
-        canJoin ? nameField.el : h('p', { class: 'invite__closed' }, info.type === 'duel' ? 'Dieses Duell ist schon voll.' : 'Hier ist kein Platz mehr frei.')),
+        canJoin ? nameField.el : h('p', { class: 'invite__closed' }, closedInviteText(info))),
       canJoin ? h('div', { class: 'sticky-action' }, btn) : h('a', { class: 'btn btn--lg', href: hrefFor('home') }, icon('home'), 'Zum Start'));
   }
 
@@ -79,9 +79,29 @@ export function inviteView({ code, settings, onJoined, announce = null }) {
       h('a', { class: 'btn btn--primary btn--lg', href: hrefFor('duel') }, icon('duel'), 'Neues Duell erstellen')));
   }
 
-  api('info', { code })
-    .then((info) => { if (!disposed) renderInfo(info); })
-    .catch((err) => { if (!disposed) renderMissing(err.message); });
+  /** Netz-/Serverproblem: nicht „Raum nicht gefunden“ behaupten, sondern erneut versuchen lassen. */
+  function renderRetry(message) {
+    heading.textContent = 'Einladung';
+    const retry = h('button', { type: 'button', class: 'btn btn--primary btn--lg', onclick: load }, icon('replay'), 'Erneut versuchen');
+    replaceChildren(body, h('div', { class: 'invite glass' },
+      h('p', {}, message),
+      h('p', { class: 'muted' }, 'Die Einladung konnte gerade nicht geladen werden.'),
+      retry));
+    announce?.(`Einladung konnte nicht geladen werden. ${message}`);
+    retry.focus();
+  }
+
+  function load() {
+    replaceChildren(body, h('div', { class: 'invite glass invite--loading' }, h('div', { class: 'spinner', 'aria-hidden': 'true' }), h('p', {}, 'Einladung wird geladen …')));
+    api('info', { code })
+      .then((info) => { if (!disposed) renderInfo(info); })
+      .catch((err) => {
+        if (disposed) return;
+        if (inviteErrorKind(err) === 'missing') renderMissing(err.message);
+        else renderRetry(err.message);
+      });
+  }
+  load();
 
   return { el, focus: () => heading.focus({ preventScroll: true }), dispose() { disposed = true; } };
 }

@@ -5,11 +5,12 @@ import { h, replaceChildren, wait, animate, centerOf, prefersLessMotion } from '
 import { icon } from './icons.js';
 import { toggleButton } from './components.js';
 import { matchEndOverlay } from './match-end.js';
+import { reactionBar } from './reaction-bar.js';
 import { createHand, handIcon } from '../hands.js';
 import * as fx from '../fx.js';
 import * as audio from '../audio.js';
 import { MOVE_NAMES, VARIANT_NAMES } from '../rules.js';
-import { MOVE_LETTERS } from '../arena.js';
+import { MOVE_LETTERS } from '../move-keys.js';
 
 // ─── Takt & Dauern (ms) ───
 export const BEAT_MS = 500;
@@ -22,8 +23,6 @@ const HISTORY_MAX = 12;
 const HASH_PREVIEW_CHARS = 4;
 const NONCE_PREVIEW_CHARS = 8;
 const SHAKE_INTENSITY = Object.freeze({ win: 1, lose: 0.7, draw: 0.4 });
-
-export const REACTIONS = Object.freeze(['👍', '😂', '😱', '🔥', '😭', '🤝', '👏', '😈']);
 
 const STATUS_TEXT = Object.freeze({ choosing: 'wählt …', ready: 'bereit ✓', offline: 'offline', left: 'hat verlassen' });
 // Nur wichtige Statuswechsel vorlesen („wählt …“ käme jede Runde und wäre zu geschwätzig).
@@ -43,12 +42,17 @@ const WORD_OUT_MS = 220;
 
 const shortHash = (hex) => `${hex.slice(0, HASH_PREVIEW_CHARS)}…`;
 
-const REACTION_COOLDOWN_MS = 1000;   // Server erlaubt 1 Reaktion pro Sekunde
 const SECOND_MS = 1000;
 const END_NOTES = Object.freeze({
   leave: (opp) => `${opp} hat das Spiel verlassen.`,
   claim: (opp, won) => (won ? `${opp} war zu lange weg – Sieg beansprucht.` : 'Du warst zu lange weg.'),
   forfeit: (opp, won) => (won ? `${opp} hat nicht rechtzeitig aufgedeckt.` : 'Du hast nicht rechtzeitig aufgedeckt.'),
+});
+
+const FAIR_PROBLEM = Object.freeze({
+  hash: 'Der aufgedeckte Zug passt nicht zum Hash – sha256(„Zug:Nonce“) ergibt etwas anderes.',
+  shown: 'Der Hash beim Aufdecken ist ein anderer als der, der vorher angezeigt wurde.',
+  own: 'Für deinen Zug wurde ein anderer Hash gespeichert, als dein Browser berechnet hat.',
 });
 
 const DEADLINE_TEXT = Object.freeze({
@@ -77,7 +81,6 @@ export function createArenaView(opts) {
   let refocusMoves = false; // nach „Nochmal“ Fokus auf die Zug-Buttons
   let series = null;
   let deadlineTimer = null;
-  let reactionCooldown = false;
   const moveButtons = new Map();
 
   // ─── Gerüst ───
@@ -110,8 +113,7 @@ export function createArenaView(opts) {
   const insight = h('div', { class: 'insight', hidden: true }, insightToggle.el, insightBox);
   const moves = h('div', { class: 'moves', role: 'group', 'aria-label': 'Dein Zug' });
   const history = h('ol', { class: 'history', 'aria-label': 'Rundenverlauf' });
-  const reactions = h('div', { class: 'reactions', role: 'group', 'aria-label': 'Reaktion senden', hidden: true },
-    REACTIONS.map((emoji) => h('button', { type: 'button', class: 'reactions__btn', 'aria-label': `Reaktion ${emoji}`, onclick: (e) => sendReaction(emoji, e.currentTarget) }, emoji)));
+  const reactions = reactionBar({ onReact: opts.onReact, hidden: true }).el;
   // Kein Live-Bereich: der Text zählt sekündlich herunter; angesagt wird nur der Start einer Frist.
   const deadline = h('p', { class: 'deadline', hidden: true });
   let deadlineWho = null;
@@ -145,17 +147,6 @@ export function createArenaView(opts) {
       h('span', { class: ['pip', i < filled && 'pip--on'] })));
   }
 
-  function sendReaction(emoji, btn) {
-    if (reactionCooldown) return;
-    reactionCooldown = true;
-    reactions.classList.add('reactions--cooldown');
-    setTimeout(() => { reactionCooldown = false; reactions.classList.remove('reactions--cooldown'); }, REACTION_COOLDOWN_MS);
-    const c = centerOf(btn);
-    fx.floatEmoji(emoji, { x: c.x });
-    audio.play('pop');
-    opts.onReact(emoji);
-  }
-
   function renderInsight() {
     insightBox.hidden = !insightOn;
     insightBox.textContent = insightText ?? 'Noch keine Gedanken – spiel ein paar Runden.';
@@ -164,6 +155,39 @@ export function createArenaView(opts) {
   function setMovesEnabled(enabled) {
     for (const btn of moveButtons.values()) btn.setAttribute('aria-disabled', String(!enabled));
     moves.classList.toggle('moves--locked', !enabled);
+  }
+
+  function showCommit(text, label, title) {
+    commitBadge.hidden = false;
+    commitBadge.textContent = text;
+    commitBadge.setAttribute('aria-label', label);
+    commitBadge.title = title;
+  }
+
+  function setDeadline(seconds, who = 'reveal') {
+    clearInterval(deadlineTimer);
+    deadline.hidden = seconds === null || seconds === undefined;
+    if (deadline.hidden) { deadlineWho = null; return; }
+    let left = seconds;
+    const text = DEADLINE_TEXT[who] ?? DEADLINE_TEXT.reveal;
+    if (deadlineWho !== who) announce(text(oppName, left).replace('⏳ ', ''));
+    deadlineWho = who;
+    deadline.classList.toggle('deadline--mine', who === 'commit');
+    const render = () => { deadline.textContent = text(oppName, left); };
+    render();
+    deadlineTimer = setInterval(() => { left = Math.max(0, left - 1); render(); }, SECOND_MS);
+  }
+
+  function setClaimAvailable(available) {
+    claimBtn.hidden = !available;
+  }
+
+  function setRematchStatus({ me, opp, oppLeft }) {
+    if (!overlay) return;
+    if (oppLeft) overlay.update({ status: `${oppName} ist nicht mehr da – keine Revanche möglich.`, againDisabled: true });
+    else if (me && !opp) overlay.update({ status: `Warte auf ${oppName} …`, againDisabled: true });
+    else if (opp && !me) overlay.update({ status: `${oppName} will Revanche!`, againDisabled: false, highlight: true });
+    else overlay.update({ status: null, againDisabled: false });
   }
 
   function showWord(text) {
@@ -232,16 +256,34 @@ export function createArenaView(opts) {
       for (const btn of moveButtons.values()) btn.classList.remove('move-btn--chosen');
       setMovesEnabled(true);
       if (commit) {
-        commitBadge.hidden = false;
-        commitBadge.textContent = `🔒 ${shortHash(commit)}`;
-        commitBadge.setAttribute('aria-label', `Zug des Gegners ist festgelegt, Fingerabdruck ${shortHash(commit)}`);
+        showCommit(`🔒 ${shortHash(commit)}`, `Zug des Gegners ist festgelegt, Fingerabdruck ${shortHash(commit)}`,
+          'Der Computer hat seinen Zug schon festgelegt – das ist sein Fingerabdruck (SHA-256).');
       } else {
         commitBadge.hidden = true;
       }
     },
 
+    /** Online: Gegner hat gewählt – sein Hash (Fingerabdruck) wird vor dem Aufdecken gezeigt. */
+    setOpponentCommit(hash) {
+      showCommit(`🔒 gewählt: ${shortHash(hash)}`,
+        `${oppName} hat gewählt, Fingerabdruck ${shortHash(hash)}`,
+        `${oppName} hat seinen Zug festgelegt – das ist der Fingerabdruck (SHA-256). Nach dem Aufdecken wird er geprüft.`);
+    },
+
+    /** Zug-Buttons freigeben/sperren (z. B. nach fehlgeschlagener Abgabe wieder frei). */
+    setMovesEnabled(enabled) {
+      if (enabled) for (const btn of moveButtons.values()) btn.classList.remove('move-btn--chosen');
+      setMovesEnabled(enabled);
+    },
+
     setChosen(move) {
       setMovesEnabled(false);
+      // Statt „… wähle deinen Zug“ bzw. eines alten Fehlers jetzt auf den Gegner warten
+      // (das Ergebnis der Vorrunde bleibt stehen)
+      if (result.querySelector('.result__hint') || result.classList.contains('result--error')) {
+        result.className = 'result';
+        replaceChildren(result, h('span', { class: 'result__hint' }, `Warte auf ${oppName} …`));
+      }
       moveButtons.get(move)?.classList.add('move-btn--chosen');
       audio.play('pop');
     },
@@ -293,7 +335,7 @@ export function createArenaView(opts) {
       result.className = `result result--${key}`;
       replaceChildren(result,
         h('span', { class: 'result__sentence' }, round.sentence),
-        h('span', { class: 'result__sub' }, round.forfeit ? 'Nicht rechtzeitig aufgedeckt.' : OUTCOME_TEXT[round.outcome]));
+        h('span', { class: 'result__sub' }, OUTCOME_TEXT[round.outcome])); // Forfeit steht schon im Satz
       animate(result, [{ transform: 'translateY(10px) scale(.96)', opacity: 0 }, { transform: 'none', opacity: 1 }], { duration: RESULT_IN_MS, easing: 'ease-out' });
       audio.play(key);
       announce(`${round.sentence}. ${OUTCOME_TEXT[round.outcome]}`);
@@ -322,17 +364,15 @@ export function createArenaView(opts) {
       while (history.children.length > HISTORY_MAX) history.firstElementChild.remove();
     },
 
-    setFairness({ ok, proof }) {
+    setFairness({ ok, proof, reason = null }) {
       fairness.hidden = false;
-      replaceChildren(fairness, h('details', { class: ['fair__details', ok ? 'fair--ok' : 'fair--bad'] },
-        h('summary', { class: 'fair__summary' }, ok ? null : icon('warn', { size: 16 }), ok ? 'fair ✓' : 'Hash passt nicht!'),
+      replaceChildren(fairness, h('details', { class: ['fair__details', ok ? 'fair--ok' : 'fair--bad'], open: !ok },
+        h('summary', { class: 'fair__summary' }, ok ? null : icon('warn', { size: 16 }), ok ? 'fair ✓' : '⚠ Hash passt nicht'),
         h('dl', { class: 'fair__list' },
           h('dt', {}, 'Zug'), h('dd', {}, MOVE_NAMES[proof.move] ?? proof.move),
           h('dt', {}, 'Nonce'), h('dd', {}, h('code', { title: proof.nonce }, `${proof.nonce.slice(0, NONCE_PREVIEW_CHARS)}…`)),
           h('dt', {}, 'Hash'), h('dd', {}, h('code', { class: 'fair__hash' }, proof.hash))),
-        h('p', { class: 'fair__note' }, ok
-          ? 'sha256(„Zug:Nonce“) ergibt genau den Hash, der vor deiner Wahl angezeigt wurde.'
-          : 'Der aufgedeckte Zug passt nicht zum vorher gezeigten Hash.')));
+        h('p', { class: 'fair__note' }, ok ? 'sha256(„Zug:Nonce“) ergibt genau den Hash, der vor dem Aufdecken festgelegt wurde.' : FAIR_PROBLEM[reason] ?? FAIR_PROBLEM.hash)));
     },
 
     setInsight(text) {
@@ -347,21 +387,27 @@ export function createArenaView(opts) {
       audio.play('pop');
     },
 
-    async showMatchOver({ won, score, reason }) {
+    /** won: true/false, null = kein Sieger (neutral); rematch: letzter Revanche-Status (online). */
+    async showMatchOver({ won, score, reason, rematch = null }) {
       setMovesEnabled(false);
-      this.setDeadline(null, null);
-      this.setClaimAvailable(false);
-      const note = END_NOTES[reason]?.(oppName, won) ?? null;
+      setDeadline(null, null);
+      setClaimAvailable(false);
+      const note = won === null ? null : END_NOTES[reason]?.(oppName, won) ?? null;
       overlay = matchEndOverlay({
         won, score, myName, oppName, note, series,
         againLabel: opts.againLabel, onAgain: opts.onAgain, onMenu: opts.onMenu,
       });
       main.inert = true;
       el.append(overlay.el);
-      audio.play(won ? 'matchWin' : 'matchLose');
-      if (won) fx.confetti({});
-      else fx.rain({});
-      announce(`${won ? 'Sieg' : 'Niederlage'}! ${score[0]} zu ${score[1]}.`);
+      if (rematch) setRematchStatus(rematch);
+      if (won === null) {
+        announce(`Match beendet, ohne Sieger. ${score[0]} zu ${score[1]}.`);
+      } else {
+        audio.play(won ? 'matchWin' : 'matchLose');
+        if (won) fx.confetti({});
+        else fx.rain({});
+        announce(`${won ? 'Sieg' : 'Niederlage'}! ${score[0]} zu ${score[1]}.`);
+      }
       overlay.focus();
     },
 
@@ -379,31 +425,9 @@ export function createArenaView(opts) {
       if (value) seriesEl.textContent = `Serie ${value.me} : ${value.opp}`;
     },
 
-    setDeadline(seconds, who = 'reveal') {
-      clearInterval(deadlineTimer);
-      deadline.hidden = seconds === null || seconds === undefined;
-      if (deadline.hidden) { deadlineWho = null; return; }
-      let left = seconds;
-      const text = DEADLINE_TEXT[who] ?? DEADLINE_TEXT.reveal;
-      if (deadlineWho !== who) announce(text(oppName, left).replace('⏳ ', ''));
-      deadlineWho = who;
-      deadline.classList.toggle('deadline--mine', who === 'commit');
-      const render = () => { deadline.textContent = text(oppName, left); };
-      render();
-      deadlineTimer = setInterval(() => { left = Math.max(0, left - 1); render(); }, SECOND_MS);
-    },
-
-    setClaimAvailable(available) {
-      claimBtn.hidden = !available;
-    },
-
-    setRematchStatus({ me, opp, oppLeft }) {
-      if (!overlay) return;
-      if (oppLeft) overlay.update({ status: `${oppName} ist nicht mehr da – keine Revanche möglich.`, againDisabled: true });
-      else if (me && !opp) overlay.update({ status: `Warte auf ${oppName} …`, againDisabled: true });
-      else if (opp && !me) overlay.update({ status: `${oppName} will Revanche!`, againDisabled: false, highlight: true });
-      else overlay.update({ status: null, againDisabled: false });
-    },
+    setDeadline,
+    setClaimAvailable,
+    setRematchStatus,
 
     dispose() {
       clearInterval(deadlineTimer);
