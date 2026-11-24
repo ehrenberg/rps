@@ -106,7 +106,7 @@ test('Komplettes Best of 3: Reihenfolge, Statistik, Fairness, Matchende', async 
 
   await play(ctl, 'rock');
   assert.equal(ctl.phase, PHASE.OVER);
-  assert.deepEqual(view.last('showMatchOver')[1], { won: true, score: [2, 0], reason: 'score' });
+  assert.deepEqual(view.last('showMatchOver')[1], { won: true, score: [2, 0], reason: 'score', oppName: undefined, series: null });
   assert.deepEqual(stats.rounds.map((r) => r.result), ['w', 'd', 'w']);
   assert.deepEqual(stats.matches, [{ mode: 'cpu-3', result: 'w' }]);
 

@@ -75,3 +75,46 @@ export async function playUntilOver(page, pickMove) {
 export function readScore(page) {
   return page.$$eval('.scoreboard .pips', (els) => els.map((e) => e.querySelectorAll('.pip--on').length));
 }
+
+// ─── Online ───
+
+/** Neuer Kontext + Seite, ohne Start-URL; sammelt Probleme wie openPage. */
+export async function newPlayer(browser, viewport = MOBILE) {
+  const { page, context, problems } = await openPage(browser, viewport, '#/');
+  return { page, context, problems };
+}
+
+/** Raum anlegen (type 'duel' | 'tournament') und Raumcode zurückgeben. */
+export async function createRoom(page, type, name, { variant = 'classic', bestOf = 3 } = {}) {
+  await page.goto(`${BASE_URL}/#/${type}`);
+  await page.fill(`#${type}-name`, name);
+  await page.click(`[data-name="variant"] [data-value="${variant}"]`);
+  await page.click(`[data-name="bestOf"] [data-value="${bestOf}"]`);
+  await page.click('.btn--start');
+  await page.waitForSelector('.screen--lobby');
+  return (await page.evaluate(() => location.hash)).slice(1);
+}
+
+/** Einladungslink öffnen, Namen eingeben, beitreten. */
+export async function joinRoom(page, code, name) {
+  await page.goto(`${BASE_URL}/#${code}`);
+  await page.waitForSelector('#invite-name');
+  await page.fill('#invite-name', name);
+  await page.click('.btn--start');
+}
+
+export const enabledMove = '.move-btn[aria-disabled="false"]';
+
+/** Spielt Züge, bis eine Seite das Matchende zeigt. moves(roundIndex) → [zugA, zugB]. */
+export async function playOnlineMatch(a, b, moves) {
+  for (let r = 0; r < 40; r++) {
+    await Promise.all([a, b].map((p) => p.waitForSelector(`${enabledMove}, .overlay`, { timeout: 20_000 })));
+    if (await a.$('.overlay')) break;
+    const [ma, mb] = moves(r);
+    const before = await a.$$eval('.history__item', (els) => els.length);
+    await a.click(`.move-btn[data-move="${ma}"]`);
+    await b.click(`.move-btn[data-move="${mb}"]`);
+    await a.waitForFunction((n) => document.querySelectorAll('.history__item').length > n || document.querySelector('.overlay'), before, { timeout: 20_000 });
+  }
+  await Promise.all([a, b].map((p) => p.waitForSelector('.overlay', { timeout: 20_000 })));
+}

@@ -39,10 +39,29 @@ const WORD_OUT_MS = 220;
 
 const shortHash = (hex) => `${hex.slice(0, HASH_PREVIEW_CHARS)}…`;
 
+const REACTION_COOLDOWN_MS = 1000;   // Server erlaubt 1 Reaktion pro Sekunde
+const SECOND_MS = 1000;
+const END_NOTES = Object.freeze({
+  leave: (opp) => `${opp} hat das Spiel verlassen.`,
+  claim: (opp, won) => (won ? `${opp} war zu lange weg – Sieg beansprucht.` : 'Du warst zu lange weg.'),
+  forfeit: (opp, won) => (won ? `${opp} hat nicht rechtzeitig aufgedeckt.` : 'Du hast nicht rechtzeitig aufgedeckt.'),
+});
+
+const DEADLINE_TEXT = Object.freeze({
+  reveal: (opp, s) => `⏳ ${opp} deckt auf … noch ${s} s`,
+  commit: (opp, s) => `⏳ Noch ${s} s für deinen Zug …`,
+  oppCommit: (opp, s) => `⏳ ${opp} hat noch ${s} s`,
+});
+
+/** Kleiner Platzhalter für nicht aufgedeckte Züge (Forfeit). */
+const moveIcon = (move) => (move ? handIcon(move) : h('span', { class: 'history__unknown' }, '?'));
+
 /**
  * @param {{ myName:string, announce:(text:string)=>void, onChoose:(move:string)=>void,
  *           onAgain:()=>void, onMenu?:()=>void, onReact:(emoji:string)=>void,
- *           insightOn:boolean, onInsightToggle:(on:boolean)=>void, modeLabel:string }} opts
+ *           insightOn:boolean, onInsightToggle:(on:boolean)=>void, modeLabel:string,
+ *           againLabel?:string, onClaim?:()=>void, onLeave?:()=>void }} opts
+ *  againLabel: Beschriftung im Matchende-Overlay („Nochmal“, „Revanche“, „Zum Turnierbaum“)
  */
 export function createArenaView(opts) {
   const { myName, announce } = opts;
@@ -52,6 +71,9 @@ export function createArenaView(opts) {
   let insightText = null;
   let insightOn = opts.insightOn;
   let refocusMoves = false; // nach „Nochmal“ Fokus auf die Zug-Buttons
+  let series = null;
+  let deadlineTimer = null;
+  let reactionCooldown = false;
   const moveButtons = new Map();
 
   // ─── Gerüst ───
@@ -85,19 +107,26 @@ export function createArenaView(opts) {
   const moves = h('div', { class: 'moves', role: 'group', 'aria-label': 'Dein Zug' });
   const history = h('ol', { class: 'history', 'aria-label': 'Rundenverlauf' });
   const reactions = h('div', { class: 'reactions', role: 'group', 'aria-label': 'Reaktion senden', hidden: true },
-    REACTIONS.map((emoji) => h('button', { type: 'button', class: 'reactions__btn', 'aria-label': `Reaktion ${emoji}`, onclick: () => opts.onReact(emoji) }, emoji)));
+    REACTIONS.map((emoji) => h('button', { type: 'button', class: 'reactions__btn', 'aria-label': `Reaktion ${emoji}`, onclick: (e) => sendReaction(emoji, e.currentTarget) }, emoji)));
+  const deadline = h('p', { class: 'deadline', hidden: true, role: 'status' });
+  const claimBtn = h('button', { type: 'button', class: 'btn btn--danger claim', hidden: true, onclick: () => opts.onClaim?.() }, icon('trophy', { size: 18 }), 'Sieg beanspruchen');
+  const leaveBtn = opts.onLeave
+    ? h('button', { type: 'button', class: 'btn btn--ghost arena__leave', onclick: () => opts.onLeave() }, icon('door', { size: 18 }), h('span', {}, 'Verlassen'))
+    : null;
+  const seriesEl = h('span', { class: 'scoreboard__series', hidden: true });
 
   const main = h('div', { class: 'arena__main' },
     h('div', { class: 'arena__top' },
       h('a', { class: 'btn btn--ghost btn--icon screen__back', href: '#/', 'aria-label': 'Zurück zum Menü', onclick: opts.onMenu }, icon('back'), h('span', { class: 'screen__back-label' }, 'Menü')),
-      h('p', { class: 'arena__mode' }, opts.modeLabel)),
+      h('p', { class: 'arena__mode' }, opts.modeLabel),
+      leaveBtn),
     h('div', { class: 'scoreboard glass' },
       h('div', { class: 'player player--me' }, meName, mePips),
-      roundLabel,
+      h('div', { class: 'scoreboard__mid' }, roundLabel, seriesEl),
       h('div', { class: 'player player--opp' }, oppNameEl, oppPips, oppDetail, oppStatus, commitBadge)),
     stage,
     result,
-    h('div', { class: 'arena__info' }, fairness, insight),
+    h('div', { class: 'arena__info' }, deadline, claimBtn, fairness, insight),
     moves,
     history,
     reactions);
@@ -108,6 +137,17 @@ export function createArenaView(opts) {
     container.setAttribute('aria-label', `${who}: ${filled} von ${target} Siegen`);
     replaceChildren(container, Array.from({ length: target }, (_, i) =>
       h('span', { class: ['pip', i < filled && 'pip--on'] })));
+  }
+
+  function sendReaction(emoji, btn) {
+    if (reactionCooldown) return;
+    reactionCooldown = true;
+    reactions.classList.add('reactions--cooldown');
+    setTimeout(() => { reactionCooldown = false; reactions.classList.remove('reactions--cooldown'); }, REACTION_COOLDOWN_MS);
+    const c = centerOf(btn);
+    fx.floatEmoji(emoji, { x: c.x });
+    audio.play('pop');
+    opts.onReact(emoji);
   }
 
   function renderInsight() {
@@ -232,8 +272,8 @@ export function createArenaView(opts) {
 
     async reveal(round) {
       const key = OUTCOME_KEY[round.outcome];
-      handMe.setMove(round.myMove);
-      handOpp.setMove(round.oppMove);
+      handMe.setMove(round.myMove ?? 'fist');
+      handOpp.setMove(round.oppMove ?? 'fist');
       audio.play('clash');
       const c = centerOf(stage);
       fx.sparks(c.x, c.y);
@@ -267,10 +307,11 @@ export function createArenaView(opts) {
 
     addHistory(round) {
       const key = OUTCOME_KEY[round.outcome];
-      const label = `Runde ${round.number}: ${MOVE_NAMES[round.myMove]} gegen ${MOVE_NAMES[round.oppMove]} – ${{ win: 'gewonnen', lose: 'verloren', draw: 'unentschieden' }[key]}`;
+      const name = (m) => MOVE_NAMES[m] ?? 'nichts';
+      const label = `Runde ${round.number}: ${name(round.myMove)} gegen ${name(round.oppMove)} – ${{ win: 'gewonnen', lose: 'verloren', draw: 'unentschieden' }[key]}`;
       history.append(h('li', { class: `history__item history__item--${key}`, 'aria-label': label, title: label },
-        h('span', { class: 'history__icon' }, handIcon(round.myMove)),
-        h('span', { class: 'history__icon history__icon--opp' }, handIcon(round.oppMove))));
+        h('span', { class: 'history__icon' }, moveIcon(round.myMove)),
+        h('span', { class: 'history__icon history__icon--opp' }, moveIcon(round.oppMove))));
       while (history.children.length > HISTORY_MAX) history.firstElementChild.remove();
     },
 
@@ -293,14 +334,21 @@ export function createArenaView(opts) {
     },
 
     showReaction({ emoji, fromMe }) {
-      const c = centerOf(fromMe ? handMe.el : handOpp.el);
+      if (fromMe) return; // eigene Reaktion wurde schon beim Klick gezeigt
+      const c = centerOf(handOpp.el);
       fx.floatEmoji(emoji, { x: c.x });
       audio.play('pop');
     },
 
-    async showMatchOver({ won, score }) {
+    async showMatchOver({ won, score, reason }) {
       setMovesEnabled(false);
-      overlay = matchEndOverlay({ won, score, myName, oppName, onAgain: opts.onAgain, onMenu: opts.onMenu });
+      this.setDeadline(null, null);
+      this.setClaimAvailable(false);
+      const note = END_NOTES[reason]?.(oppName, won) ?? null;
+      overlay = matchEndOverlay({
+        won, score, myName, oppName, note, series,
+        againLabel: opts.againLabel, onAgain: opts.onAgain, onMenu: opts.onMenu,
+      });
       main.inert = true;
       el.append(overlay.el);
       audio.play(won ? 'matchWin' : 'matchLose');
@@ -316,6 +364,40 @@ export function createArenaView(opts) {
       overlay.el.remove();
       overlay = null;
       main.inert = false;
+    },
+
+    setSeries(value) {
+      series = value;
+      seriesEl.hidden = !value;
+      if (value) seriesEl.textContent = `Serie ${value.me} : ${value.opp}`;
+    },
+
+    setDeadline(seconds, who = 'reveal') {
+      clearInterval(deadlineTimer);
+      deadline.hidden = seconds === null || seconds === undefined;
+      if (deadline.hidden) return;
+      let left = seconds;
+      const text = DEADLINE_TEXT[who] ?? DEADLINE_TEXT.reveal;
+      deadline.classList.toggle('deadline--mine', who === 'commit');
+      const render = () => { deadline.textContent = text(oppName, left); };
+      render();
+      deadlineTimer = setInterval(() => { left = Math.max(0, left - 1); render(); }, SECOND_MS);
+    },
+
+    setClaimAvailable(available) {
+      claimBtn.hidden = !available;
+    },
+
+    setRematchStatus({ me, opp, oppLeft }) {
+      if (!overlay) return;
+      if (oppLeft) overlay.update({ status: `${oppName} ist nicht mehr da – keine Revanche möglich.`, againDisabled: true });
+      else if (me && !opp) overlay.update({ status: `Warte auf ${oppName} …`, againDisabled: true });
+      else if (opp && !me) overlay.update({ status: `${oppName} will Revanche!`, againDisabled: false, highlight: true });
+      else overlay.update({ status: null, againDisabled: false });
+    },
+
+    dispose() {
+      clearInterval(deadlineTimer);
     },
 
     showError(message) {

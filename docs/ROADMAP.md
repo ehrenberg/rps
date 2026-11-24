@@ -28,19 +28,19 @@ Jede Phase endet mit etwas Spielbarem. Abnahme jeweils im Browser (Desktop + Han
 - [x] Statistik-Screen, Zurücksetzen
 - **Abnahme:** Gegen ein festes Muster (z. B. Stein, Papier, Schere im Kreis) gewinnt die KI nach < 15 Runden fast immer. Test dafür in `tests/`.
 
-## Phase 4 – Online-Duell
+## Phase 4 – Online-Duell ✅
 - [x] `api.php` + `src/` (SQLite, create/join/state/commit/reveal/rematch/react/claim/leave)
-- [ ] Commit-Reveal inkl. Frist, Hash-Prüfung im Client (Server ✅, Client offen)
-- [ ] Lobby mit Link, Kopieren, Teilen, QR-Code
-- [ ] Polling mit Backoff, Online-Anzeige, Revanche + Serie
-- [ ] Emoji-Reaktionen
+- [x] Commit-Reveal inkl. Frist, Hash-Prüfung im Client
+- [x] Lobby mit Link, Kopieren, Teilen, QR-Code
+- [x] Polling mit Backoff, Online-Anzeige, Revanche + Serie
+- [x] Emoji-Reaktionen
 - [x] Auto-Löschen nach 24 h
 - **Abnahme:** Zwei Browser spielen 3 Matches mit Revanche; Reload mitten im Match behält den Platz; Gegner kann über DevTools den Zug nicht vor dem eigenen Reveal sehen.
 
-## Phase 5 – Turnier
-- [ ] Turnierraum, Lobby mit Spielerliste, Host-Start
-- [ ] K.-o.-Baum mit Freilosen, parallele Matches, Zuschauer-Ansicht
-- [ ] Siegerehrung, neues Turnier
+## Phase 5 – Turnier ✅
+- [x] Turnierraum, Lobby mit Spielerliste, Host-Start
+- [x] K.-o.-Baum mit Freilosen, parallele Matches, Zuschauer-Ansicht
+- [x] Siegerehrung, neues Turnier
 - **Abnahme:** Turnier mit 5 Browserfenstern läuft bis zum Sieger durch.
 
 ## Phase 6 – Feinschliff & Livegang

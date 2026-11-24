@@ -10,7 +10,8 @@ import * as cpuSetup from './ui/cpu-setup.js';
 import * as arenaScreen from './ui/arena-screen.js';
 import * as statsScreen from './ui/stats-screen.js';
 import * as settingsScreen from './ui/settings-screen.js';
-import { comingSoon } from './ui/coming-soon.js';
+import * as room from './ui/room.js';
+import { createRoomScreen } from './ui/create-room.js';
 
 const APP_TITLE = 'Schere Stein Papier';
 const LIVE_CLEAR_MS = 50;
@@ -22,9 +23,9 @@ const SCREENS = Object.freeze({
   play: arenaScreen,
   stats: statsScreen,
   settings: settingsScreen,
-  duel: comingSoon('duel'),
-  tournament: comingSoon('tournament'),
-  room: comingSoon('room'),
+  duel: createRoomScreen('duel'),
+  tournament: createRoomScreen('tournament'),
+  room,
 });
 
 const root = document.documentElement;
@@ -86,6 +87,7 @@ function render() {
   }
   const screen = SCREENS[route.name];
   current?.dispose?.();
+  fx.clear?.();
   const next = screen.render({ settings, prefs, announce, navigate, params: route.params });
   current = next;
   document.title = route.name === 'home' ? APP_TITLE : `${screen.title} – ${APP_TITLE}`;

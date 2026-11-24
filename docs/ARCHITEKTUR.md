@@ -39,14 +39,16 @@ rps/
 │   │       ├── cpu-opponent.js Adapter: Computer-Gegner (Commit vor Spielerwahl)
 │   │       ├── online-opponent.js Adapter: Online-Gegner (Commit-Reveal über API)
 │   │       ├── ai.js           Computer-Stufen
-│   │       ├── net.js          API-Client + Polling
+│   │       ├── net.js          API-Client, Polling mit Backoff, Raum-Session (sessionStorage)
+│   │       ├── bracket.js      Turnierbaum-Layout und Match-Status (DOM-frei)
 │   │       ├── crypto.js       SHA-256 (crypto.subtle + Fallback), Nonce
 │   │       ├── hands.js        SVG-Hände
 │   │       ├── fx.js           Canvas-Partikel, Screen-Shake
 │   │       ├── audio.js        Web-Audio-Synth
 │   │       ├── stats.js        localStorage-Statistik
 │   │       ├── qr.js           QR-Code-Generator (eigener Code)
-│   │       └── ui/…            Screens + Komponenten (home, arena-view, lobby, bracket, stats, …)
+│   │       └── ui/…            Screens + Komponenten (home, room, invite, lobby, share, arena-view,
+│   │                           bracket-view, match-end, stats, settings, toast, …)
 │   ├── src/                    PHP-Logik (per .htaccess gesperrt)
 │   │   ├── .htaccess           "Require all denied"
 │   │   ├── handler.php         Aktionen: Eingabe → Logik → DB (ohne HTTP, testbar)

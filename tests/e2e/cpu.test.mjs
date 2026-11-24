@@ -148,26 +148,27 @@ test('Statistik: leerer Zustand, nach Match gefüllt, Zurücksetzen mit Bestäti
   await context.close();
 });
 
-test('Routing: Raumcode → Platzhalter, unbekannt → Start, Online/Turnier bald', async () => {
+test('Routing: unbekannter Raum → freundliche Meldung, unbekannt → Start, Duell/Turnier erstellen', async () => {
   const { page, context, problems } = await openPage(browser, MOBILE, '#k7f3qa');
-  await page.waitForSelector('.screen--soon-room');
-  assert.equal(await page.textContent('.soon__code code'), 'k7f3qa');
+  await page.waitForFunction(() => document.querySelector('#invite-title')?.textContent === 'Raum nicht gefunden');
+  assert.match(await page.textContent('.invite'), /gibt es nicht/);
   await page.goto(`${BASE_URL}/#/gibtsnicht`);
   await page.waitForSelector('.screen--home');
   assert.equal(await page.evaluate(() => location.hash), '#/');
-  for (const [href, cls] of [['#/duel', 'soon-duel'], ['#/tournament', 'soon-tournament']]) {
+  for (const [href, cls] of [['#/duel', 'create-duel'], ['#/tournament', 'create-tournament']]) {
     await page.goto(`${BASE_URL}/#/`);
     await page.click(`a[href="${href}"]`);
     await page.waitForSelector(`.screen--${cls}`);
     await page.waitForFunction(() => document.activeElement?.tagName === 'H1'); // Fokus auf Überschrift
   }
-  assert.deepEqual(problems, []);
+  // erwartet: 404 der info-Abfrage für den unbekannten Raum
+  assert.deepEqual(problems.filter((p) => !p.includes('404')), []);
   await context.close();
 });
 
 test('Keine Seite scrollt horizontal (375 px) und Footer verlinkt Impressum/Datenschutz', async () => {
   const { page, context } = await openPage(browser, MOBILE);
-  for (const hash of ['#/', '#/cpu', '#/play', '#/stats', '#/settings', '#k7f3qa']) {
+  for (const hash of ['#/', '#/cpu', '#/play', '#/stats', '#/settings', '#k7f3qa', '#/duel', '#/tournament']) {
     await page.goto(`${BASE_URL}/${hash}`);
     await page.waitForSelector('.screen');
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);

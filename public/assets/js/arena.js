@@ -16,18 +16,25 @@
 // @property {() => Promise|void} rematch                  Nochmal/Revanche anfragen
 // @property {(emoji:string) => void} sendReaction          nur wenn features.reactions
 // @property {() => void} dispose                          Timer/Polling beenden
+// @property {() => Promise} [claim]                       optional: Sieg beanspruchen (online)
 //
 // Ereignisse Adapter → Controller (type, payload):
-//   matchStart     { variant, bestOf, target, oppName, oppDetail?, series? }
+//   matchStart     { variant, bestOf, target, oppName, oppDetail?, series?, score?, history? }
+//                  score/history: bereits gespielte Runden (Wiederaufnahme nach Reload)
 //   opponentStatus { state: 'choosing'|'ready'|'offline'|'left' }        sofort
 //   roundOpen      { round, commit: hex|null }    Zugwahl freigeben; commit = Gegner-Hash
+//   moveRestored   { move|null }                  eigener Zug war schon abgegeben (Reload)
 //   roundLocked    {}                             beide haben gewählt → Countdown
 //   roundResolved  { number, myMove, oppMove, outcome: 1|0|-1, result: 'w'|'d'|'l',
 //                    sentence, score: [ich, Gegner], proof: {hash, move, nonce}|null, forfeit? }
 //   insight        { text }                       „Was denkt der Computer?“ (Stufe 4)
-//   matchOver      { winner: 'me'|'opp', score, reason: 'score'|'forfeit'|'leave'|… }
+//   matchOver      { winner: 'me'|'opp'|null, score, reason: 'score'|'forfeit'|'leave'|'claim'|…,
+//                    replay?, oppName?, series? }   replay: schon vorher beendet → keine Statistik
 //   reaction       { emoji, fromMe }                                     sofort
 //   error          { message, fatal? }                                   sofort
+//   deadline       { seconds|null, who: 'reveal'|'commit'|'oppCommit'|null }  laufende Frist   sofort
+//   claimAvailable { available }      Gegner lange offline → Sieg beanspruchbar   sofort
+//   rematchStatus  { me, opp, oppLeft }  Revanche-Wünsche (Duell)          sofort
 //
 // Ereignisse ohne „sofort“ werden in Reihenfolge abgearbeitet; jede Animation (Countdown,
 // Aufdecken, Matchende) läuft zu Ende, bevor das nächste Ereignis an die Reihe kommt.
@@ -48,13 +55,15 @@
 //   showMatchOver({ won, score, reason }) → Promise
 //   hideMatchOver()
 //   showError(message)
+//   optional (online): setDeadline(seconds|null, who), setClaimAvailable(bool), setRematchStatus(info),
+//   setSeries(series|null)
 // ───────────────────────────────────────────────────────────────────────────────────────────
 
 import { movesFor, isValidMove } from './rules.js';
 import { verifyCommit } from './crypto.js';
 
 /** Ereignisse, die nicht auf laufende Animationen warten. */
-const IMMEDIATE_EVENTS = new Set(['opponentStatus', 'reaction', 'error']);
+const IMMEDIATE_EVENTS = new Set(['opponentStatus', 'reaction', 'error', 'deadline', 'claimAvailable', 'rematchStatus']);
 
 export const PHASE = Object.freeze({
   WAITING: 'waiting',     // auf roundOpen warten
@@ -97,11 +106,18 @@ export function createArenaController({ adapter, view, stats = null, verify = ve
     matchStart(p) {
       view.hideMatchOver();
       view.setup({ ...p, moves: movesFor(p.variant ?? variant), features: adapter.info.features });
+      if (p.score) view.setScore(p.score, { scorer: null });
+      for (const round of p.history ?? []) view.addHistory(round);
+      view.setSeries?.(p.series ?? null);
       setPhase(PHASE.WAITING);
     },
     roundOpen(p) {
       view.setRoundOpen(p);
       setPhase(PHASE.CHOOSING);
+    },
+    moveRestored(p) {
+      setPhase(PHASE.SUBMITTED);
+      view.setChosen(p.move);
     },
     async roundLocked() {
       setPhase(PHASE.PLAYING);
@@ -127,8 +143,9 @@ export function createArenaController({ adapter, view, stats = null, verify = ve
     async matchOver(p) {
       setPhase(PHASE.OVER);
       const won = p.winner === 'me';
-      stats?.recordMatch({ mode: adapter.info.statsMode, result: won ? 'w' : 'l' });
-      await view.showMatchOver({ won, score: p.score, reason: p.reason });
+      if (!p.replay) stats?.recordMatch({ mode: adapter.info.statsMode, result: won ? 'w' : 'l' });
+      view.setSeries?.(p.series ?? null);
+      await view.showMatchOver({ won, score: p.score, reason: p.reason, oppName: p.oppName, series: p.series ?? null });
     },
     opponentStatus(p) {
       view.setOpponentStatus(p.state);
@@ -139,6 +156,9 @@ export function createArenaController({ adapter, view, stats = null, verify = ve
     error(p) {
       view.showError(p.message);
     },
+    deadline(p) { view.setDeadline?.(p.seconds, p.who); },
+    claimAvailable(p) { view.setClaimAvailable?.(p.available); },
+    rematchStatus(p) { view.setRematchStatus?.(p); },
   };
 
   function onEvent(type, payload) {
@@ -181,8 +201,18 @@ export function createArenaController({ adapter, view, stats = null, verify = ve
     rematch() {
       if (disposed || phase !== PHASE.OVER) return false;
       setPhase(PHASE.WAITING);
-      Promise.resolve(adapter.rematch()).catch((err) => view.showError(err?.message ?? String(err)));
+      Promise.resolve(adapter.rematch()).catch((err) => {
+        if (disposed) return;
+        setPhase(PHASE.OVER);
+        view.showError(err?.message ?? String(err));
+      });
       return true;
+    },
+
+    /** Sieg beanspruchen (nur Adapter mit claim). */
+    claim() {
+      if (disposed || !adapter.claim) return;
+      Promise.resolve(adapter.claim()).catch((err) => view.showError(err?.message ?? String(err)));
     },
 
     react(emoji) {
