@@ -557,6 +557,15 @@ html[data-route="play"] .app, .app:has(.screen--arena) { max-width: var(--arena-
 }
 .reactions__btn:hover { transform: scale(1.15); }
 .reactions__btn:focus-visible { border-radius: 50%; }
+/* Schmal (8 × 44 px passen nicht in eine Zeile): bewusstes 2×4-Raster statt Umbruch mit Einzelgänger */
+@media (max-width: 25.5rem) {
+  .reactions { display: grid; grid-template-columns: repeat(4, minmax(var(--tap-min), 4.5rem)); justify-content: center; gap: var(--sp-2); }
+  .reactions__btn, .reactions__btn:focus-visible { width: 100%; border-radius: var(--radius-pill); }
+  .reactions__btn:hover { transform: scale(1.06); }
+}
+/* Mit sichtbarer Reaktionsleiste erscheinen Meldungen oben statt über der Leiste */
+body:has(.reactions:not([hidden])) .toasts { top: calc(var(--header-h) + var(--sp-2)); bottom: auto; }
+body:has(.reactions:not([hidden])) .toast { pointer-events: none; }  /* Klicks gehen an die Knöpfe darunter */
 
 /* ───────── Matchende-Overlay ───────── */
 .overlay {
@@ -854,7 +863,7 @@ html[data-route="play"] .app, .app:has(.screen--arena) { max-width: var(--arena-
 }
 
 /* ───────── Handy quer: kompakte Arena ohne Scrollen (Hochformat/Desktop unverändert) ─────────
-   Links Anzeigetafel, Hände, Ergebnis, Reaktionen; rechts Menüleiste, Zugknöpfe, Verlauf. */
+   Links Anzeigetafel, Hände, Ergebnis, Reaktionen, Verlauf; rechts Menüleiste, Zugknöpfe, Infos. */
 @media (orientation: landscape) and (max-height: 31.25rem) {
   :root { --header-h: var(--tap); }
   .brand__mark { width: 1.8rem; height: 1.8rem; }
@@ -869,8 +878,9 @@ html[data-route="play"] .app, .app:has(.screen--arena) { max-width: var(--arena-
       "score     top"
       "stage     moves"
       "result    moves"
-      "info      moves"
-      "reactions history";
+      "reactions info"
+      "history   info";
+    grid-template-rows: auto auto 1fr auto auto;   /* Restplatz neben den Zugknöpfen nimmt die Ergebniszeile */
     min-height: 0;
   }
   .arena__main > .scoreboard { grid-area: score; }
@@ -885,7 +895,7 @@ html[data-route="play"] .app, .app:has(.screen--arena) { max-width: var(--arena-
   .arena__top .screen__back { width: var(--tap); padding: 0; margin-left: 0; }
   .arena__top .screen__back-label, .arena__mode { display: none; }
 
-  .scoreboard { align-items: center; padding: var(--sp-2) var(--sp-3); border-radius: var(--radius); }
+  .scoreboard { align-items: center; padding: var(--sp-1) var(--sp-3); border-radius: var(--radius); }
   .player { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 0.15rem var(--sp-2); }
   .player--opp { justify-content: flex-end; }
   .player__name { font-size: 1.15rem; }
@@ -902,7 +912,7 @@ html[data-route="play"] .app, .app:has(.screen--arena) { max-width: var(--arena-
   .result { min-height: 2.75rem; }
   .result__sentence { font-size: 1.5rem; }
   .result__sub { font-size: var(--fs-xs); }
-  .arena__info { min-height: 0; }
+  .arena__info { min-height: 0; justify-content: flex-start; }
   .arena__info:empty, .arena__info:not(:has(> :not([hidden]))) { display: none; }
 
   .moves { grid-template-columns: minmax(0, 1fr); margin-top: 0; }
@@ -910,7 +920,7 @@ html[data-route="play"] .app, .app:has(.screen--arena) { max-width: var(--arena-
   .moves--five .move-btn:last-child { grid-column: 1 / -1; }
   .move-btn, .moves--five .move-btn {
     flex-direction: row; justify-content: flex-start; gap: var(--sp-2);
-    min-height: 3.5rem; padding: var(--sp-1) var(--sp-3); border-radius: var(--radius);
+    min-height: 3.25rem; padding: var(--sp-1) var(--sp-3); border-radius: var(--radius);
   }
   .move-btn__icon, .moves--five .move-btn__icon { width: 2.3rem; height: 2.3rem; flex: none; }
   .move-btn__name, .moves--five .move-btn__name { font-size: var(--fs-sm); }
