@@ -40,9 +40,18 @@ code=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/src/db.php")
 post '{"action":"create","type":"duel","name":"Anna","variant":"classic","bestOf":3}'
 expect_status 200 "create"
 ROOM=$(field code); TA=$(field token); A=$(field me)
+post "{\"action\":\"info\",\"code\":\"$ROOM\"}"; expect_status 200 "info (ohne Token)"
+grep -q '"hostName":"Anna"' <<<"$BODY" && grep -q '"joinable":true' <<<"$BODY" || fail "info falsch: $BODY"
+if grep -q "$A" <<<"$BODY"; then fail "info enthält Spieler-ID"; fi
+ok "info: Host, beitretbar, keine IDs"
+post '{"action":"info","code":"zzzzzz"}'
+expect_status 404 "info unbekannter Raum → 404"
 post "{\"action\":\"join\",\"code\":\"$ROOM\",\"name\":\"Ben\"}"
 expect_status 200 "join"; TB=$(field token)
 post "{\"action\":\"join\",\"code\":\"$ROOM\",\"name\":\"Carl\"}"; expect_status 409 "dritter Spieler → 409"
+post "{\"action\":\"info\",\"code\":\"$ROOM\"}"
+grep -q '"joinable":false' <<<"$BODY" && grep -q '"players":2' <<<"$BODY" || fail "info nach Beitritt falsch: $BODY"
+ok "info: Duell voll"
 
 post "{\"action\":\"state\",\"code\":\"$ROOM\",\"token\":\"$TA\"}"
 expect_status 200 "state"

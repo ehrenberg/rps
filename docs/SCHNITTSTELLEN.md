@@ -188,6 +188,7 @@ und fokussiert danach die `h1`.
     "commit": ["<hex>", null], "lockedAt": null | 1764000120, "deadline": null | 1764000140
   },
   "history": [ { "m": ["rock","scissors"], "n": ["<nonce>","<nonce>"], "h": ["<hex>","<hex>"], "w": 0, "f": false } ],
+  "dropped": 0,                                   // verdichtete (entfernte) alte Unentschieden, s. u.
   "winner": null | 0 | 1,
   "end": null | "score" | "forfeit" | "bye" | "claim" | "leave",
   "from": null | ["m1", "m2"]                    // Turnier ab Runde 2: Sieger dieser Matches rücken hier ein
@@ -207,6 +208,27 @@ und fokussiert danach die `h1`.
   Runde wird ohne Punkt wiederholt. Endet ein Match durch eine Forfeit-Runde: `end: "forfeit"`.
 - `players` enthält auch Gegangene (`left: true`, nie `online`), außer in der Turnier-Lobby (dort entfernt).
 - Antwort von `commit`, `reveal`, `rematch`, `start`, `react`, `claim`, `leave`: `{ "ok": true, "version": 13 }`.
+- `history` hat höchstens 200 Einträge: darüber werden die ältesten Unentschieden entfernt und in
+  `dropped` gezählt (Rundenzahl = `dropped + history.length`; neue Runde erkennen am besten daran).
+  Entscheidende Runden werden nie entfernt.
+
+### `info` (ohne Token, nur lesend – für die Einladungsseite)
+
+```jsonc
+// POST {"action":"info","code":"k7f3qa"}  → 404 {"error":"Diesen Raum gibt es nicht (mehr). …"}, wenn unbekannt
+{
+  "code": "k7f3qa", "type": "duel" | "tournament",
+  "variant": "classic" | "lizard", "bestOf": 3 | 5,
+  "status": "lobby" | "running" | "finished",
+  "hostName": "Anna" | null,
+  "players": 1,          // aktive Teilnehmer (ohne Zuschauer und Gegangene)
+  "maxPlayers": 2 | 16,
+  "joinable": true,      // `join` macht dich zum Spieler
+  "spectate": false,     // nur Turnier: `join` macht dich zum Zuschauer (läuft/beendet/16 voll)
+  "names": ["Anna", "Ben"] // nur Turnier: Teilnehmernamen
+}
+```
+- Beides `false` → kein Beitritt möglich (Duell voll/geschlossen oder Turnierraum mit 32 Personen voll).
 - `unchanged`-Antwort: `{ "version", "unchanged": true, "now", "online": { "p_ab12": true } }`.
 - Forfeit-Runde (nicht rechtzeitig aufgedeckt): fehlender Zug/Nonce ist `null`, `"f": true`.
 - `create` → `{ code, token, me }`, `join` → `{ token, me, spectator }`. Danach immer `state` laden.

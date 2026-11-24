@@ -147,6 +147,9 @@ Datenpfad: Konstante `RPS_DATA_DIR` (vorher definierbar), sonst Umgebungsvariabl
 }
 ```
 
+`history` ist auf 200 Einträge begrenzt: Darüber werden die ältesten Unentschieden entfernt und in
+`dropped` gezählt (Rundenzahl = `dropped + history.length`). Entscheidende Runden bleiben immer erhalten.
+
 **Fristen & Sonderfälle**
 - Deckt nur einer innerhalb von 20 s auf, gewinnt er die Runde (`f: true`, fehlender Zug/Nonce `null`).
   Decken **beide** nicht auf, wird die Runde ohne Punkt neu gestartet (`w: -1`, `f: true`) –
@@ -178,6 +181,7 @@ Fehler: HTTP-Status + `{"error":"text"}` (deutscher Text, direkt anzeigbar).
 | `action` | Parameter | Wirkung |
 |---|---|---|
 | `create` | `type, name, variant?, bestOf?` | Neuer Raum, Ersteller = Host (Default `classic`, 3). → `{code, token, me}` |
+| `info` | `code` | Nur lesend, ohne Token: öffentliche Rauminfo für die Einladungsseite (keine IDs/Tokens). → `{code, type, variant, bestOf, status, hostName, players, maxPlayers, joinable, spectate, names?}` |
 | `join` | `code, name` | Raum beitreten (Duell max. 2, Turnier max. 16 Teilnehmer; im laufenden/beendeten oder vollen Turnier → Zuschauer, insgesamt max. 32). → `{token, me, spectator}` |
 | `state` | `code, token, since?` | Wertet Fristen aus, aktualisiert `seen` (nur wenn > 5 s alt, ohne `version` zu erhöhen), liefert Sicht des Spielers. Bei `since == version` nur `{version, unchanged:true, now, online:{…}}` |
 | `commit` | `code, token, hash` | Verdeckter Zug für laufende Runde des eigenen Matches → `{ok, version}` |

@@ -179,3 +179,32 @@ function test_match_view_hides_moves_and_nonces(): void
     assert_same(T0 + RPS_REVEAL_SECONDS, $v['cur']['deadline']);
     assert_same(['committed', 'revealed', 'commit', 'lockedAt', 'deadline'], array_keys($v['cur']));
 }
+
+function test_match_history_compacts_oldest_draws(): void
+{
+    $m = rps_match_new('p_a', 'p_b', 3);
+    $play = static function (array $m, string $a, string $b): array {
+        [$ha, $na] = t_commit($a);
+        [$hb, $nb] = t_commit($b);
+        $m = rps_match_commit(rps_match_commit($m, 0, $ha, T0), 1, $hb, T0);
+        return rps_match_reveal(rps_match_reveal($m, 0, $a, $na, 'classic'), 1, $b, $nb, 'classic');
+    };
+    $m = $play($m, 'rock', 'scissors');           // entscheidende Runde ganz vorne
+    for ($i = 0; $i < RPS_HISTORY_MAX + 10; $i++) {
+        $m = $play($m, 'paper', 'paper');
+    }
+    assert_same(RPS_HISTORY_MAX, count($m['history']));
+    assert_same(11, $m['dropped']);
+    assert_same(0, $m['history'][0]['w'], 'entscheidende Runde bleibt erhalten');
+    assert_same([1, 0], $m['score']);
+    assert_same(11, rps_match_view('m1', $m)['dropped']);
+}
+
+function test_match_history_compaction_keeps_decisive_rounds(): void
+{
+    $m = rps_match_new('p_a', 'p_b', 2);
+    $m['history'] = array_fill(0, RPS_HISTORY_MAX + 1, ['m' => ['rock', 'paper'], 'n' => [null, null], 'h' => [null, null], 'w' => 1, 'f' => false]);
+    $c = rps_match_compact_history($m);
+    assert_same(RPS_HISTORY_MAX + 1, count($c['history']), 'ohne Unentschieden wird nichts entfernt');
+    assert_same(0, $c['dropped']);
+}

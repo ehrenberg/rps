@@ -5,7 +5,7 @@ require_once __DIR__ . '/bootstrap.php';
 
 const T_VIEW_KEYS = ['version', 'now', 'code', 'type', 'variant', 'bestOf', 'status', 'me', 'host', 'players',
     'matches', 'current', 'myMatch', 'series', 'rematch', 'bracket', 'round', 'champion', 'reactions'];
-const T_MATCH_KEYS = ['id', 'p', 'score', 'target', 'cur', 'history', 'winner', 'end', 'from'];
+const T_MATCH_KEYS = ['id', 'p', 'score', 'target', 'cur', 'history', 'dropped', 'winner', 'end', 'from'];
 
 function test_view_fairness_no_move_before_both_revealed(): void
 {
@@ -97,4 +97,53 @@ function test_view_online_flags_and_unchanged(): void
     assert_same([$a => true, $b => false], (array) $u['online']);
     $v = rps_room_view($room, 'k7f3qa', 7, $b, $now);
     assert_same(true, $v['players'][1]['left']);
+}
+
+function test_view_info_duel(): void
+{
+    [$room] = t_room('duel', 1, 5, 'lizard');
+    $info = rps_room_info($room, 'k7f3qa');
+    assert_same([
+        'code' => 'k7f3qa', 'type' => 'duel', 'variant' => 'lizard', 'bestOf' => 5, 'status' => 'lobby',
+        'hostName' => 'Spieler0', 'players' => 1, 'maxPlayers' => RPS_DUEL_PLAYERS,
+        'joinable' => true, 'spectate' => false,
+    ], $info);
+    [$full, [$a]] = t_room('duel', 2);
+    $info = rps_room_info($full, 'k7f3qa');
+    assert_same([false, false, 2], [$info['joinable'], $info['spectate'], $info['players']]);
+    $closed = rps_room_leave($full, $a);
+    $info = rps_room_info($closed, 'k7f3qa');
+    assert_same(['finished', false, false, 1], [$info['status'], $info['joinable'], $info['spectate'], $info['players']]);
+}
+
+function test_view_info_tournament(): void
+{
+    [$room, $ids, $tokens] = t_room('tournament', 3);
+    $info = rps_room_info($room, 'k7f3qa');
+    assert_same(['Spieler0', 'Spieler1', 'Spieler2'], $info['names']);
+    assert_same([3, RPS_TOURNAMENT_MAX, true, false], [$info['players'], $info['maxPlayers'], $info['joinable'], $info['spectate']]);
+    $json = json_encode($info);
+    foreach ($ids as $i => $id) {
+        assert_true(!str_contains($json, $id) && !str_contains($json, $tokens[$i]), 'ID/Token in info');
+    }
+    assert_true(!str_contains($json, 'tokenHash'));
+    $running = rps_tournament_start($room, $ids[0]);
+    $info = rps_room_info($running, 'k7f3qa');
+    assert_same(['running', false, true], [$info['status'], $info['joinable'], $info['spectate']]);
+    // Lobby mit 16 Teilnehmern: nur noch Zuschauer.
+    [$fullLobby] = t_room('tournament', RPS_TOURNAMENT_MAX);
+    $info = rps_room_info($fullLobby, 'k7f3qa');
+    assert_same([false, true], [$info['joinable'], $info['spectate']]);
+    // Raum komplett voll: weder noch.
+    [$packed] = t_room('tournament', RPS_ROOM_MAX_PLAYERS);
+    $info = rps_room_info($packed, 'k7f3qa');
+    assert_same([false, false, RPS_TOURNAMENT_MAX], [$info['joinable'], $info['spectate'], $info['players']]);
+}
+
+function test_view_info_without_host(): void
+{
+    [$room, [$a]] = t_room('tournament', 1);
+    $room = rps_room_leave($room, $a);
+    assert_same(null, rps_room_info($room, 'k7f3qa')['hostName']);
+    assert_same([], rps_room_info($room, 'k7f3qa')['names']);
 }

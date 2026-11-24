@@ -24,6 +24,7 @@ function rps_handle(PDO $pdo, array $in, int $now, ?callable $chance = null): ar
         rps_db_cleanup($pdo, $now);
     }
     return match ($action) {
+        'info' => rps_action_info($pdo, $in),
         'join' => rps_action_join($pdo, $in, $now),
         'state' => rps_action_state($pdo, $in, $now),
         'commit' => rps_action_simple($pdo, $in, $now, static fn(array $r, string $id): array =>
@@ -81,6 +82,14 @@ function rps_insert_with_new_code(PDO $pdo, array $room, int $now): string
         }
     }
     throw new RpsError('Es konnte kein Raum erstellt werden. Bitte versuche es noch einmal.', 503);
+}
+
+/** Nur lesend: öffentliche Rauminfo für die Einladungsseite. */
+function rps_action_info(PDO $pdo, array $in): array
+{
+    $code = rps_valid_code($in['code'] ?? null);
+    $loaded = rps_db_load_room($pdo, $code) ?? throw rps_room_not_found();
+    return rps_room_info($loaded['room'], $code);
 }
 
 function rps_action_join(PDO $pdo, array $in, int $now): array

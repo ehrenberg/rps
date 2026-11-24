@@ -2,6 +2,7 @@
 // Sicht eines Spielers auf den Raum (Antwort von `state`). Keine geheimen Daten (Tokens, offene Züge).
 declare(strict_types=1);
 
+require_once __DIR__ . '/duel.php';
 require_once __DIR__ . '/tournament.php';
 
 function rps_room_view(array $room, string $code, int $version, string $me, int $now): array
@@ -58,4 +59,34 @@ function rps_room_unchanged_view(array $room, int $version, int $now): array
         'now' => $now,
         'online' => (object) rps_room_online($room, $now),
     ];
+}
+
+/**
+ * Öffentliche Rauminfo für die Einladungsseite (ohne Token): keine IDs, keine Tokens.
+ * Im Turnier zusätzlich die Teilnehmernamen (in der Lobby ohnehin sichtbar).
+ */
+function rps_room_info(array $room, string $code): array
+{
+    $isDuel = $room['type'] === 'duel';
+    $participants = $isDuel ? rps_room_active_ids($room) : rps_tournament_participants($room);
+    $joinable = $isDuel
+        ? $room['status'] === 'lobby' && count($room['order']) < RPS_DUEL_PLAYERS
+        : $room['status'] === 'lobby' && count($participants) < RPS_TOURNAMENT_MAX;
+    $roomFree = count($room['order']) < RPS_ROOM_MAX_PLAYERS;
+    $info = [
+        'code' => $code,
+        'type' => $room['type'],
+        'variant' => $room['variant'],
+        'bestOf' => $room['bestOf'],
+        'status' => $room['status'],
+        'hostName' => $room['host'] === null ? null : $room['players'][$room['host']]['name'],
+        'players' => count($participants),
+        'maxPlayers' => $isDuel ? RPS_DUEL_PLAYERS : RPS_TOURNAMENT_MAX,
+        'joinable' => $joinable && $roomFree,
+        'spectate' => !$isDuel && !$joinable && $roomFree,
+    ];
+    if (!$isDuel) {
+        $info['names'] = array_map(static fn(string $id): string => $room['players'][$id]['name'], $participants);
+    }
+    return $info;
 }

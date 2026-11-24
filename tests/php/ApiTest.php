@@ -316,3 +316,17 @@ function test_api_db_uses_wal_or_delete(): void
     assert_true(in_array($mode, ['wal', 'delete'], true), $mode);
     assert_same(RPS_DB_BUSY_MS, (int) $pdo->query('PRAGMA busy_timeout')->fetchColumn());
 }
+
+function test_api_info_is_read_only_and_needs_no_token(): void
+{
+    [$pdo, $code] = t_api_duel();
+    $before = rps_db_load_room($pdo, $code);
+    $info = t_api($pdo, ['action' => 'info', 'code' => strtoupper($code)], T0 + 100);
+    assert_same($code, $info['code']);
+    assert_same('Anna', $info['hostName']);
+    assert_same(false, $info['joinable']);
+    assert_same($before, rps_db_load_room($pdo, $code), 'info darf nichts schreiben');
+    $missing = $code === 'zzzzzz' ? 'yyyyyy' : 'zzzzzz';
+    assert_rps_error(static fn() => t_api($pdo, ['action' => 'info', 'code' => $missing]), 404, 'gibt es nicht');
+    assert_rps_error(static fn() => t_api($pdo, ['action' => 'info']), 400, 'Raumcode');
+}

@@ -5,6 +5,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/validate.php';
 
 const RPS_REVEAL_SECONDS = 20;
+const RPS_HISTORY_MAX = 200;   // mehr Einträge → älteste Unentschieden werden verdichtet
 
 /**
  * @param list<string>|null $from Turnier: IDs der Vorgänger-Matches (Platzhalter), sonst null
@@ -17,6 +18,7 @@ function rps_match_new(?string $a, ?string $b, int $target, ?array $from = null)
         'target' => $target,
         'cur' => rps_round_new(),
         'history' => [],
+        'dropped' => 0,
         'winner' => null,
         'end' => null,
         'from' => $from,
@@ -116,12 +118,32 @@ function rps_match_close_round(array $m, int $w, bool $forfeit, string $endReaso
         'w' => $w,
         'f' => $forfeit,
     ];
+    $m = rps_match_compact_history($m);
     $m['cur'] = rps_round_new();
     if ($w >= 0) {
         $m['score'][$w]++;
         if ($m['score'][$w] >= $m['target']) {
             $m = rps_match_finish($m, $w, $endReason);
         }
+    }
+    return $m;
+}
+
+/**
+ * Begrenzt history auf RPS_HISTORY_MAX: entfernt die ältesten Unentschieden und zählt sie in
+ * `dropped`. Entscheidende Runden bleiben immer erhalten (höchstens 2·target−1 Stück).
+ */
+function rps_match_compact_history(array $m): array
+{
+    while (count($m['history']) > RPS_HISTORY_MAX) {
+        foreach ($m['history'] as $i => $entry) {
+            if ($entry['w'] === -1) {
+                array_splice($m['history'], $i, 1);
+                $m['dropped'] = ($m['dropped'] ?? 0) + 1;
+                continue 2;
+            }
+        }
+        break;
     }
     return $m;
 }
@@ -162,6 +184,7 @@ function rps_match_view(string $id, array $m): array
             'deadline' => $c['lockedAt'] === null ? null : $c['lockedAt'] + RPS_REVEAL_SECONDS,
         ],
         'history' => $m['history'],
+        'dropped' => $m['dropped'] ?? 0,
         'winner' => $m['winner'],
         'end' => $m['end'],
         'from' => $m['from'] ?? null,
