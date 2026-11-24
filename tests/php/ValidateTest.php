@@ -113,3 +113,39 @@ function test_validate_move_input(): void
     assert_rps_error(static fn() => rps_valid_move_input(''), 400, 'Zug');
     assert_rps_error(static fn() => rps_valid_move_input(['rock']), 400);
 }
+
+function test_validate_name_strips_invisible_fillers(): void
+{
+    foreach (["\u{3164}", "\u{115F}", "\u{1160}", "\u{FFA0}", "\u{2800}", "\u{180E}", "\u{034F}", "\u{3164}\u{2800} \u{200B}"] as $filler) {
+        assert_rps_error(static fn() => rps_clean_name($filler), 400, 'Namen');
+    }
+    assert_same('Anna', rps_clean_name("\u{3164}An\u{2800}na\u{FFA0}"));
+}
+
+function test_validate_name_unicode_spaces_collapse(): void
+{
+    assert_same('A B C', rps_clean_name("A\u{2003}\u{2009}B\u{3000}\u{205F}C"));
+    assert_same('A B', rps_clean_name("A\tB"));
+    assert_same('A B', rps_clean_name("A \u{200A} \u{2000} B"));
+}
+
+function test_validate_name_keeps_zwj_only_between_emoji(): void
+{
+    $family = "👨\u{200D}👩\u{200D}👧";
+    assert_same($family . ' Familie', rps_clean_name($family . ' Familie'));
+    assert_same("❤\u{FE0F}\u{200D}🔥", rps_clean_name("❤\u{FE0F}\u{200D}🔥"));
+    assert_same('AB', rps_clean_name("A\u{200D}B"));
+    assert_same('A🔥', rps_clean_name("A\u{200D}🔥"));
+    assert_rps_error(static fn() => rps_clean_name("\u{200D}"), 400);
+}
+
+function test_validate_name_nfc_if_intl_available(): void
+{
+    $decomposed = "Jo\u{0065}\u{0301}l";
+    if (!function_exists('normalizer_normalize')) {
+        // intl fehlt: Name bleibt (zerlegt) erhalten – Test übersprungen.
+        assert_same($decomposed, rps_clean_name($decomposed));
+        return;
+    }
+    assert_same("Jo\u{00E9}l", rps_clean_name($decomposed));
+}

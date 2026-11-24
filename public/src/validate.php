@@ -72,9 +72,15 @@ function rps_valid_token(mixed $token): string
     return $token;
 }
 
+/** Unsichtbare Füllzeichen, die nicht in \p{C} liegen (Hangul-Filler, Braille-Leerzeichen, CGJ, Khmer). */
+const RPS_INVISIBLE_CHARS = '\x{115F}\x{1160}\x{3164}\x{FFA0}\x{2800}\x{034F}\x{17B4}\x{17B5}\x{180E}';
+/** Zeichen, zwischen denen ein ZWJ (U+200D) erlaubt ist: Emoji, Hauttöne, Variation Selector 16. */
+const RPS_EMOJI_CHARS = '\x{2300}-\x{23FF}\x{2600}-\x{27BF}\x{2B00}-\x{2BFF}\x{1F000}-\x{1FAFF}\x{FE0F}';
+
 /**
- * Bereinigt einen Namen: Steuer-/Formatzeichen (inkl. Zero-Width) raus, Leerraum zusammenfassen,
- * trimmen. Erlaubt 1–20 Zeichen (Codepoints).
+ * Bereinigt einen Namen: NFC (falls intl vorhanden), alle Leerraumarten → ein Leerzeichen,
+ * unsichtbare Füll-, Steuer- und Formatzeichen raus (ZWJ nur zwischen Emoji erlaubt), trimmen.
+ * Erlaubt 1–20 Zeichen (Codepoints).
  */
 function rps_clean_name(mixed $name): string
 {
@@ -84,13 +90,7 @@ function rps_clean_name(mixed $name): string
     if (strlen($name) > 400 || !mb_check_encoding($name, 'UTF-8')) {
         throw new RpsError('Ungültiger Name.', 400);
     }
-    // \p{C}: Steuerzeichen, Formatzeichen (Zero-Width, Bidi), private/unbelegte Codepoints.
-    $name = preg_replace('/\p{C}+/u', '', $name);
-    $name = $name === null ? null : preg_replace('/[\s\p{Z}]+/u', ' ', $name);
-    $name = $name === null ? null : preg_replace('/^[\s\p{Z}]+|[\s\p{Z}]+$/u', '', $name);
-    if ($name === null) {
-        throw new RpsError('Ungültiger Name.', 400);
-    }
+    $name = rps_strip_invisible(rps_normalize_nfc($name));
     $len = mb_strlen($name, 'UTF-8');
     if ($len === 0) {
         throw new RpsError('Bitte gib einen Namen ein.', 400);
@@ -99,6 +99,35 @@ function rps_clean_name(mixed $name): string
         throw new RpsError('Der Name darf höchstens 20 Zeichen lang sein.', 400);
     }
     return $name;
+}
+
+function rps_normalize_nfc(string $s): string
+{
+    if (!function_exists('normalizer_normalize')) {
+        return $s;
+    }
+    $n = normalizer_normalize($s);
+    return is_string($n) ? $n : $s;
+}
+
+/** Entfernt Unsichtbares, fasst Leerraum zusammen und trimmt (erwartet gültiges UTF-8). */
+function rps_strip_invisible(string $s): string
+{
+    $e = RPS_EMOJI_CHARS;
+    $steps = [
+        '/[\s\p{Z}]/u' => ' ',                                      // Tab, NBSP, U+2000–200A … → Leerzeichen
+        '/[' . RPS_INVISIBLE_CHARS . ']/u' => '',
+        '/[^\P{C}\x{200D}]/u' => '',                                // \p{C} außer ZWJ
+        "/(?<![$e])\\x{200D}|\\x{200D}(?![$e])/u" => '',            // ZWJ nur zwischen Emoji
+        '/ {2,}/' => ' ',
+    ];
+    foreach ($steps as $pattern => $replacement) {
+        $s = preg_replace($pattern, $replacement, $s);
+        if ($s === null) {
+            throw new RpsError('Ungültiger Name.', 400);
+        }
+    }
+    return trim($s, ' ');
 }
 
 /**

@@ -7,7 +7,6 @@ require_once __DIR__ . '/db.php';
 
 const RPS_CODE_ATTEMPTS = 20;
 const RPS_CLEANUP_PERCENT = 5;    // Wahrscheinlichkeit für Aufräumen bei Nicht-create-Requests
-const RPS_VACUUM_PERCENT = 1;     // Wahrscheinlichkeit für VACUUM bei create
 
 /**
  * Führt eine Aktion aus. Wirft RpsError bei fachlichen Fehlern.
@@ -18,13 +17,13 @@ function rps_handle(PDO $pdo, array $in, int $now, ?callable $chance = null): ar
     $chance ??= static fn(int $percent): bool => random_int(1, 100) <= $percent;
     $action = $in['action'] ?? null;
     if ($action === 'create') {
-        return rps_action_create($pdo, $in, $now, $chance);
+        return rps_action_create($pdo, $in, $now);
     }
     if ($chance(RPS_CLEANUP_PERCENT)) {
         rps_db_cleanup($pdo, $now);
     }
     return match ($action) {
-        'info' => rps_action_info($pdo, $in),
+        'info' => rps_action_info($pdo, $in, $now),
         'join' => rps_action_join($pdo, $in, $now),
         'state' => rps_action_state($pdo, $in, $now),
         'commit' => rps_action_simple($pdo, $in, $now, static fn(array $r, string $id): array =>
@@ -53,24 +52,31 @@ function rps_valid_move_input(mixed $move): string
     return $move;
 }
 
-function rps_action_create(PDO $pdo, array $in, int $now, callable $chance): array
+function rps_action_create(PDO $pdo, array $in, int $now): array
 {
     $type = rps_valid_type($in['type'] ?? null);
     $name = rps_clean_name($in['name'] ?? null);
     $variant = rps_valid_variant_input($in['variant'] ?? null);
     $bestOf = rps_valid_best_of($in['bestOf'] ?? null);
 
-    rps_db_cleanup($pdo, $now);
-    if (rps_db_count_rooms($pdo) >= RPS_MAX_ROOMS) {
-        throw new RpsError('Gerade sind sehr viele Räume offen. Bitte versuche es später noch einmal.', 503);
-    }
     [$token, $tokenHash] = rps_new_token();
     [$room, $me] = rps_room_add_player(rps_room_new($type, $variant, $bestOf), $name, $tokenHash, $now, false);
-    $code = rps_insert_with_new_code($pdo, $room, $now);
-    if ($chance(RPS_VACUUM_PERCENT)) {
-        rps_db_vacuum($pdo);
-    }
+    // Aufräumen, Limit prüfen und Einfügen in einer Transaktion → Limit kann nicht überschritten werden.
+    $code = rps_db_transaction($pdo, static function () use ($pdo, $room, $now): string {
+        rps_db_cleanup($pdo, $now);
+        rps_ensure_room_capacity($pdo, $now);
+        return rps_insert_with_new_code($pdo, $room, $now);
+    });
     return ['code' => $code, 'token' => $token, 'me' => $me];
+}
+
+/** Bei vollem Limit zuerst inaktive Lobbys verdrängen, sonst freundlich ablehnen. */
+function rps_ensure_room_capacity(PDO $pdo, int $now): void
+{
+    $excess = rps_db_count_rooms($pdo) - RPS_MAX_ROOMS + 1;
+    if ($excess > 0 && rps_db_evict_idle_lobbies($pdo, $now, $excess) < $excess) {
+        throw new RpsError('Gerade sind sehr viele Räume offen. Bitte versuche es später noch einmal.', 503);
+    }
 }
 
 function rps_insert_with_new_code(PDO $pdo, array $room, int $now): string
@@ -85,10 +91,10 @@ function rps_insert_with_new_code(PDO $pdo, array $room, int $now): string
 }
 
 /** Nur lesend: öffentliche Rauminfo für die Einladungsseite. */
-function rps_action_info(PDO $pdo, array $in): array
+function rps_action_info(PDO $pdo, array $in, int $now): array
 {
     $code = rps_valid_code($in['code'] ?? null);
-    $loaded = rps_db_load_room($pdo, $code) ?? throw rps_room_not_found();
+    $loaded = rps_db_load_room($pdo, $code, $now) ?? throw rps_room_not_found();
     return rps_room_info($loaded['room'], $code);
 }
 
@@ -124,7 +130,7 @@ function rps_action_state(PDO $pdo, array $in, int $now): array
     $token = rps_valid_token($in['token'] ?? null);
     $since = isset($in['since']) && is_int($in['since']) ? $in['since'] : null;
 
-    $loaded = rps_db_load_room($pdo, $code) ?? throw rps_room_not_found();
+    $loaded = rps_db_load_room($pdo, $code, $now) ?? throw rps_room_not_found();
     $id = rps_room_require_player($loaded['room'], $token);
     [$room, $version] = [$loaded['room'], $loaded['version']];
     if (rps_state_update($room, $id, $now) !== $room) {
@@ -160,7 +166,7 @@ function rps_room_not_found(): RpsError
 function rps_with_room(PDO $pdo, string $code, int $now, callable $fn): mixed
 {
     return rps_db_transaction($pdo, static function () use ($pdo, $code, $now, $fn): mixed {
-        $loaded = rps_db_load_room($pdo, $code) ?? throw rps_room_not_found();
+        $loaded = rps_db_load_room($pdo, $code, $now) ?? throw rps_room_not_found();
         [$room, $result] = $fn($loaded['room']);
         $version = $loaded['version'];
         if (rps_room_essence($room) !== rps_room_essence($loaded['room'])) {

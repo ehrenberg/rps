@@ -320,3 +320,16 @@ function test_tournament_deadline_forfeit_advances_bracket(): void
     assert_same('forfeit', $room['matches']['m1']['end']);
     assert_same([$x, null], $room['matches']['m3']['p']);
 }
+
+function test_tournament_commit_deadline_unblocks_bracket(): void
+{
+    [$room, $ids] = t_room('tournament', 4);
+    $room = rps_tournament_start($room, $ids[0]);
+    $room['matches']['m1']['target'] = 1;
+    [$x] = $room['matches']['m1']['p'];
+    [$h] = t_commit('rock');
+    $room = rps_room_commit($room, $x, $h, T0);
+    $room = rps_room_tick($room, T0 + RPS_COMMIT_SECONDS + 1);
+    assert_same('forfeit', $room['matches']['m1']['end']);
+    assert_same([$x, null], $room['matches']['m3']['p']);
+}

@@ -51,3 +51,18 @@ nicht erst, wenn die ganze Runde fertig ist. Der komplette Baum (`bracket`) steh
 Gegangene verlieren automatisch, Zuschauer werden beim nächsten Turnier Teilnehmer.
 **Begründung:** Weniger Wartezeit für schnelle Spieler, und das Frontend kann den Baum von
 Anfang an vollständig zeichnen.
+
+### 2026-11-24 – Sicherheits-Review: Maßnahmen
+**Entscheidung:** Nach einem unabhängigen Security-Review (keine kritischen/hohen Befunde):
+- Raumlimit gegen DoS gehärtet: verwaiste Lobbys werden nach 60 min gelöscht; bei vollem Limit
+  verdrängt `create` zuerst inaktive Lobbys (≥ 10 min), Zählen + Einfügen in einer Transaktion.
+- Kein synchrones `VACUUM` mehr, stattdessen `auto_vacuum = INCREMENTAL` + `incremental_vacuum`;
+  `history` pro Match auf 50 Einträge begrenzt (älteste Unentschieden werden verdichtet).
+- Wahl-Frist 60 s, sobald der Gegner gewählt hat (gegen Blockieren durch Nicht-Wählen).
+- Namen: unsichtbare Füllzeichen (Hangul-Filler, Braille-Leerzeichen u. a.) raus, alle Leerraumarten
+  → ein Leerzeichen, ZWJ nur zwischen Emoji, NFC falls `intl` vorhanden.
+- Räume werden **24 h nach Erstellung** hart gelöscht (nicht erst 24 h nach letzter Änderung),
+  `secure_delete = ON`.
+- Raumcodes bleiben 6 Zeichen.
+**Begründung:** Kurze Links sind ein Kernfeature. Enumeration ist durch die kurze Lebensdauer von
+Lobbys entschärft, und das Token schützt die Plätze – ein erratener Code erlaubt nur Beitritt/Zuschauen.

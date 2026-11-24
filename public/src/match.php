@@ -4,8 +4,9 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/validate.php';
 
-const RPS_REVEAL_SECONDS = 20;
-const RPS_HISTORY_MAX = 200;   // mehr Einträge → älteste Unentschieden werden verdichtet
+const RPS_REVEAL_SECONDS = 20;   // Frist zum Aufdecken ab lockedAt
+const RPS_COMMIT_SECONDS = 60;   // Frist zum Wählen, sobald der Gegner gewählt hat
+const RPS_HISTORY_MAX = 50;   // mehr Einträge → älteste Unentschieden werden verdichtet
 
 /**
  * @param list<string>|null $from Turnier: IDs der Vorgänger-Matches (Platzhalter), sonst null
@@ -27,7 +28,13 @@ function rps_match_new(?string $a, ?string $b, int $target, ?array $from = null)
 
 function rps_round_new(): array
 {
-    return ['commit' => [null, null], 'move' => [null, null], 'nonce' => [null, null], 'lockedAt' => null];
+    return [
+        'commit' => [null, null],
+        'move' => [null, null],
+        'nonce' => [null, null],
+        'firstCommitAt' => null,   // Zeit des ersten Commits (startet die Wahl-Frist des anderen)
+        'lockedAt' => null,
+    ];
 }
 
 function rps_match_over(array $m): bool
@@ -75,6 +82,8 @@ function rps_match_commit(array $m, int $idx, string $hash, int $now): array
     $m['cur']['commit'][$idx] = $hash;
     if ($m['cur']['commit'][1 - $idx] !== null) {
         $m['cur']['lockedAt'] = $now;
+    } else {
+        $m['cur']['firstCommitAt'] = $now;
     }
     return $m;
 }
@@ -148,14 +157,34 @@ function rps_match_compact_history(array $m): array
     return $m;
 }
 
-/**
- * Frist auswerten: 20 s nach lockedAt nicht aufgedeckt → Runde verloren (f: true).
- * Decken beide nicht auf, wird die Runde ohne Punkt neu gestartet (w: -1, f: true).
- */
+/** Lazy-Auswertung beider Fristen (Wählen und Aufdecken). */
 function rps_match_tick(array $m, int $now): array
 {
-    $locked = $m['cur']['lockedAt'];
-    if ($m['end'] !== null || $locked === null || $now <= $locked + RPS_REVEAL_SECONDS) {
+    if ($m['end'] !== null) {
+        return $m;
+    }
+    return $m['cur']['lockedAt'] === null
+        ? rps_match_tick_commit($m, $now)
+        : rps_match_tick_reveal($m, $now);
+}
+
+/** Hat nur einer gewählt und der andere 60 s nicht → Runde für den Wählenden (f: true, Züge null). */
+function rps_match_tick_commit(array $m, int $now): array
+{
+    $deadline = rps_match_commit_deadline($m['cur']);
+    if ($deadline === null || $now <= $deadline) {
+        return $m;
+    }
+    return rps_match_close_round($m, $m['cur']['commit'][0] !== null ? 0 : 1, true, 'forfeit');
+}
+
+/**
+ * 20 s nach lockedAt nicht aufgedeckt → Runde verloren (f: true).
+ * Decken beide nicht auf, wird die Runde ohne Punkt neu gestartet (w: -1, f: true).
+ */
+function rps_match_tick_reveal(array $m, int $now): array
+{
+    if ($now <= rps_match_reveal_deadline($m['cur'])) {
         return $m;
     }
     $r0 = $m['cur']['move'][0] !== null;
@@ -165,6 +194,18 @@ function rps_match_tick(array $m, int $now): array
         return rps_match_close_round($m, -1, true, 'forfeit');
     }
     return rps_match_close_round($m, $r0 ? 0 : 1, true, 'forfeit');
+}
+
+/** Wahl-Frist: nur solange genau einer gewählt hat, sonst null. */
+function rps_match_commit_deadline(array $cur): ?int
+{
+    $first = $cur['firstCommitAt'] ?? null;
+    return $cur['lockedAt'] === null && $first !== null ? $first + RPS_COMMIT_SECONDS : null;
+}
+
+function rps_match_reveal_deadline(array $cur): ?int
+{
+    return $cur['lockedAt'] === null ? null : $cur['lockedAt'] + RPS_REVEAL_SECONDS;
 }
 
 /** Öffentliche Sicht – enthält für die laufende Runde NIE Züge oder Nonces. */
@@ -181,7 +222,8 @@ function rps_match_view(string $id, array $m): array
             'revealed' => [$c['move'][0] !== null, $c['move'][1] !== null],
             'commit' => $c['commit'],
             'lockedAt' => $c['lockedAt'],
-            'deadline' => $c['lockedAt'] === null ? null : $c['lockedAt'] + RPS_REVEAL_SECONDS,
+            'deadline' => rps_match_reveal_deadline($c),
+            'commitDeadline' => rps_match_commit_deadline($c),
         ],
         'history' => $m['history'],
         'dropped' => $m['dropped'] ?? 0,

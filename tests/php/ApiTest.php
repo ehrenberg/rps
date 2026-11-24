@@ -134,7 +134,7 @@ function test_api_state_unchanged_and_seen_does_not_bump_version(): void
     $u = t_api_state($pdo, $code, $a, $later, $v);
     assert_true($u['unchanged']);
     assert_same([$a['me'] => true, $b['me'] => false], (array) $u['online']);
-    $row = rps_db_load_room($pdo, $code);
+    $row = rps_db_load_room($pdo, $code, T0);
     assert_same($later, $row['room']['players'][$a['me']]['seen']);
     assert_same($v, $row['version']);
     // Abweichendes since → volle Sicht.
@@ -146,9 +146,9 @@ function test_api_state_unchanged_and_seen_does_not_bump_version(): void
 function test_api_state_without_changes_does_not_write(): void
 {
     [$pdo, $code, $a] = t_api_duel();
-    $before = rps_db_load_room($pdo, $code);
+    $before = rps_db_load_room($pdo, $code, T0);
     t_api_state($pdo, $code, $a, T0 + RPS_SEEN_WRITE_SECONDS);
-    assert_same($before, rps_db_load_room($pdo, $code));
+    assert_same($before, rps_db_load_room($pdo, $code, T0));
 }
 
 function test_api_state_applies_deadline_lazily(): void
@@ -262,33 +262,130 @@ function test_api_tournament_flow(): void
     assert_same(7, count((array) $s['matches']));
 }
 
-function test_api_cleanup_and_room_limit(): void
+/** Raumzeilen direkt anlegen (Testaufbau): [code => [status, created, updated]]. */
+function t_seed_rooms(PDO $pdo, array $rows): void
+{
+    $pdo->exec('BEGIN');
+    $st = $pdo->prepare('INSERT INTO rooms (code, data, version, created, updated, status) VALUES (?, ?, 1, ?, ?, ?)');
+    foreach ($rows as $code => [$status, $created, $updated]) {
+        $st->execute([(string) $code, '{}', $created, $updated, $status]);
+    }
+    $pdo->exec('COMMIT');
+}
+
+function t_room_codes(PDO $pdo): array
+{
+    $codes = $pdo->query('SELECT code FROM rooms ORDER BY code')->fetchAll(PDO::FETCH_COLUMN);
+    return array_map('strval', $codes);
+}
+
+function test_api_cleanup_rules(): void
+{
+    $pdo = t_pdo();
+    $now = T0 + 2 * RPS_ROOM_TTL;
+    t_seed_rooms($pdo, [
+        'aaaaaa' => ['running', $now - 100, $now],                                   // bleibt
+        'bbbbbb' => ['running', $now - RPS_ROOM_TTL - 1, $now],                      // 24 h ab Erstellung → weg
+        'cccccc' => ['lobby', $now - RPS_LOBBY_TTL - 10, $now - RPS_LOBBY_TTL - 1],  // verwaiste Lobby → weg
+        'dddddd' => ['lobby', $now - RPS_LOBBY_TTL - 10, $now - RPS_LOBBY_TTL + 10], // bleibt
+        'eeeeee' => ['finished', $now - 1000, $now - 1000],                          // bleibt
+        'ffffff' => ['running', $now - 1000, $now - RPS_ROOM_TTL - 1],               // 24 h unverändert → weg
+    ]);
+    assert_same(3, rps_db_cleanup($pdo, $now));
+    assert_same(['aaaaaa', 'dddddd', 'eeeeee'], t_room_codes($pdo));
+    assert_same(0, rps_db_cleanup($pdo, $now));
+}
+
+function test_api_expired_room_is_gone_even_before_cleanup(): void
+{
+    [$pdo, $code, $a] = t_api_duel();
+    $later = T0 + RPS_ROOM_TTL + 1;
+    assert_true(rps_db_load_room($pdo, $code, T0 + RPS_ROOM_TTL) !== null);
+    assert_same(null, rps_db_load_room($pdo, $code, $later));
+    assert_rps_error(static fn() => t_api_state($pdo, $code, $a, $later), 404, 'gibt es nicht');
+    assert_rps_error(static fn() => t_api($pdo, ['action' => 'info', 'code' => $code], $later), 404);
+}
+
+function test_api_cleanup_on_requests(): void
 {
     $pdo = t_pdo();
     $old = t_api($pdo, ['action' => 'create', 'type' => 'duel', 'name' => 'Alt'], T0);
-    $other = t_api($pdo, ['action' => 'create', 'type' => 'duel', 'name' => 'Neu'], T0 + RPS_ROOM_TTL);
-    // Kein Aufräumen ohne Zufallstreffer bei Nicht-create-Requests …
-    t_api_state($pdo, $other['code'], $other, T0 + RPS_ROOM_TTL);
+    $other = t_api($pdo, ['action' => 'create', 'type' => 'duel', 'name' => 'Neu'], T0 + RPS_LOBBY_TTL);
     assert_same(2, rps_db_count_rooms($pdo));
-    // … aber mit (5 %-Treffer simuliert).
-    t_api($pdo, ['action' => 'state', 'code' => $other['code'], 'token' => $other['token']], T0 + RPS_ROOM_TTL + 1, true);
+    $now = T0 + RPS_LOBBY_TTL + 1;
+    // Kein Aufräumen ohne Zufallstreffer bei Nicht-create-Requests …
+    t_api_state($pdo, $other['code'], $other, $now);
+    assert_same(2, rps_db_count_rooms($pdo));
+    // … aber mit (5 %-Treffer simuliert): verwaiste Lobby „Alt“ ist weg.
+    t_api($pdo, ['action' => 'state', 'code' => $other['code'], 'token' => $other['token']], $now, true);
     assert_same(1, rps_db_count_rooms($pdo));
-    assert_same(null, rps_db_load_room($pdo, $old['code']));
-    // create räumt immer auf; VACUUM bei Zufallstreffer funktioniert.
-    t_api($pdo, ['action' => 'create', 'type' => 'duel', 'name' => 'X'], T0 + 3 * RPS_ROOM_TTL, true);
+    assert_same(null, rps_db_load_room($pdo, $old['code'], T0));
+    // create räumt immer auf.
+    t_api($pdo, ['action' => 'create', 'type' => 'duel', 'name' => 'X'], $now + RPS_ROOM_TTL);
     assert_same(1, rps_db_count_rooms($pdo));
 }
 
-function test_api_room_limit(): void
+function test_api_room_limit_rejects_when_only_active_rooms(): void
 {
     $pdo = t_pdo();
-    $pdo->exec('BEGIN');
-    $st = $pdo->prepare('INSERT INTO rooms (code, data, version, created, updated) VALUES (?, ?, 1, ?, ?)');
+    $now = T0 + 10 * RPS_LOBBY_EVICT_AGE;
+    $rows = [];
     for ($i = 0; $i < RPS_MAX_ROOMS; $i++) {
-        $st->execute(['r' . $i, '{}', T0, T0]);
+        $rows['r' . $i] = [$i % 2 === 0 ? 'running' : 'lobby', $now - 50, $now - 50]; // Lobbys noch frisch
     }
-    $pdo->exec('COMMIT');
-    assert_rps_error(static fn() => t_api($pdo, ['action' => 'create', 'type' => 'duel', 'name' => 'Zu viel'], T0), 503, 'viele Räume');
+    t_seed_rooms($pdo, $rows);
+    assert_rps_error(static fn() => t_api($pdo, ['action' => 'create', 'type' => 'duel', 'name' => 'Zu viel'], $now), 503, 'viele Räume');
+    assert_same(RPS_MAX_ROOMS, rps_db_count_rooms($pdo));
+}
+
+function test_api_room_limit_evicts_oldest_idle_lobby(): void
+{
+    $pdo = t_pdo();
+    $now = T0 + 10 * RPS_LOBBY_EVICT_AGE;
+    $rows = [];
+    for ($i = 0; $i < RPS_MAX_ROOMS - 3; $i++) {
+        $rows['r' . $i] = ['running', $now - 50, $now - 50];
+    }
+    $rows['lobbyold'] = ['lobby', $now - 3000, $now - RPS_LOBBY_EVICT_AGE - 200];
+    $rows['lobbymid'] = ['lobby', $now - 3000, $now - RPS_LOBBY_EVICT_AGE - 100];
+    $rows['lobbynew'] = ['lobby', $now - 100, $now - 100];
+    t_seed_rooms($pdo, $rows);
+    $r = t_api($pdo, ['action' => 'create', 'type' => 'duel', 'name' => 'Neu'], $now);
+    assert_same(RPS_MAX_ROOMS, rps_db_count_rooms($pdo));
+    $codes = t_room_codes($pdo);
+    assert_true(!in_array('lobbyold', $codes, true), 'älteste inaktive Lobby verdrängt');
+    assert_true(in_array('lobbymid', $codes, true));
+    assert_true(in_array('lobbynew', $codes, true));
+    assert_true(in_array($r['code'], $codes, true));
+}
+
+function test_api_db_pragmas(): void
+{
+    $pdo = t_pdo();
+    assert_same(2, (int) $pdo->query('PRAGMA auto_vacuum')->fetchColumn(), 'auto_vacuum = INCREMENTAL');
+    assert_same(1, (int) $pdo->query('PRAGMA secure_delete')->fetchColumn());
+    rps_db_incremental_vacuum($pdo);
+}
+
+function test_api_room_status_column_follows_room(): void
+{
+    $pdo = t_api_duel()[0];
+    assert_same('running', $pdo->query('SELECT status FROM rooms')->fetchColumn());
+}
+
+function test_api_schema_migrates_missing_status_column(): void
+{
+    $dir = sys_get_temp_dir() . '/rps-test-' . bin2hex(random_bytes(6));
+    mkdir($dir);
+    $old = new PDO('sqlite:' . $dir . '/' . RPS_DB_FILE);
+    $old->exec('CREATE TABLE rooms (code TEXT PRIMARY KEY, data TEXT NOT NULL, version INTEGER NOT NULL, created INTEGER NOT NULL, updated INTEGER NOT NULL)');
+    $old = null;
+    $pdo = rps_db_open($dir);
+    $cols = array_column($pdo->query('PRAGMA table_info(rooms)')->fetchAll(), 'name');
+    assert_true(in_array('status', $cols, true));
+    $pdo = null;
+    array_map('unlink', glob($dir . '/*') ?: []);
+    rmdir($dir);
 }
 
 function test_api_insert_room_rejects_duplicate_code(): void
@@ -302,9 +399,9 @@ function test_api_insert_room_rejects_duplicate_code(): void
 function test_api_transaction_rolls_back_on_error(): void
 {
     [$pdo, $code, $a] = t_api_duel();
-    $before = rps_db_load_room($pdo, $code);
+    $before = rps_db_load_room($pdo, $code, T0);
     assert_rps_error(static fn() => t_api($pdo, ['action' => 'rematch', 'code' => $code, 'token' => $a['token']], T0 + 100), 409);
-    assert_same($before, rps_db_load_room($pdo, $code), 'seen-Update darf bei Fehler nicht gespeichert sein');
+    assert_same($before, rps_db_load_room($pdo, $code, T0), 'seen-Update darf bei Fehler nicht gespeichert sein');
     $pdo->exec('BEGIN IMMEDIATE');
     $pdo->exec('ROLLBACK'); // keine offene Transaktion übrig
 }
@@ -320,13 +417,26 @@ function test_api_db_uses_wal_or_delete(): void
 function test_api_info_is_read_only_and_needs_no_token(): void
 {
     [$pdo, $code] = t_api_duel();
-    $before = rps_db_load_room($pdo, $code);
+    $before = rps_db_load_room($pdo, $code, T0);
     $info = t_api($pdo, ['action' => 'info', 'code' => strtoupper($code)], T0 + 100);
     assert_same($code, $info['code']);
     assert_same('Anna', $info['hostName']);
     assert_same(false, $info['joinable']);
-    assert_same($before, rps_db_load_room($pdo, $code), 'info darf nichts schreiben');
+    assert_same($before, rps_db_load_room($pdo, $code, T0), 'info darf nichts schreiben');
     $missing = $code === 'zzzzzz' ? 'yyyyyy' : 'zzzzzz';
     assert_rps_error(static fn() => t_api($pdo, ['action' => 'info', 'code' => $missing]), 404, 'gibt es nicht');
     assert_rps_error(static fn() => t_api($pdo, ['action' => 'info']), 400, 'Raumcode');
+}
+
+function test_api_state_applies_commit_deadline_lazily(): void
+{
+    [$pdo, $code, $a, $b] = t_api_duel();
+    $sa = [];
+    t_api_play($pdo, $code, $a, 'rock', 'commit', $sa);
+    $s = t_api_state($pdo, $code, $b, T0 + 1);
+    assert_same(T0 + RPS_COMMIT_SECONDS, $s['matches']->m1['cur']['commitDeadline']);
+    $s = t_api_state($pdo, $code, $b, T0 + RPS_COMMIT_SECONDS + 1);
+    assert_same([1, 0], $s['matches']->m1['score']);
+    assert_true($s['matches']->m1['history'][0]['f']);
+    assert_same(null, $s['matches']->m1['cur']['commitDeadline']);
 }

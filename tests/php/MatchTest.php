@@ -177,7 +177,8 @@ function test_match_view_hides_moves_and_nonces(): void
     assert_same([true, false], $v['cur']['revealed']);
     assert_same([true, true], $v['cur']['committed']);
     assert_same(T0 + RPS_REVEAL_SECONDS, $v['cur']['deadline']);
-    assert_same(['committed', 'revealed', 'commit', 'lockedAt', 'deadline'], array_keys($v['cur']));
+    assert_same(['committed', 'revealed', 'commit', 'lockedAt', 'deadline', 'commitDeadline'], array_keys($v['cur']));
+    assert_same(null, $v['cur']['commitDeadline'], 'gesperrt → keine Wahl-Frist');
 }
 
 function test_match_history_compacts_oldest_draws(): void
@@ -207,4 +208,49 @@ function test_match_history_compaction_keeps_decisive_rounds(): void
     $c = rps_match_compact_history($m);
     assert_same(RPS_HISTORY_MAX + 1, count($c['history']), 'ohne Unentschieden wird nichts entfernt');
     assert_same(0, $c['dropped']);
+}
+
+function test_match_commit_deadline_set_by_first_commit(): void
+{
+    $m = rps_match_new('p_a', 'p_b', 2);
+    assert_same(null, rps_match_view('m1', $m)['cur']['commitDeadline']);
+    [$h] = t_commit('rock');
+    $m = rps_match_commit($m, 1, $h, T0 + 5);
+    assert_same(T0 + 5, $m['cur']['firstCommitAt']);
+    assert_same(T0 + 5 + RPS_COMMIT_SECONDS, rps_match_view('m1', $m)['cur']['commitDeadline']);
+    assert_same(null, rps_match_view('m1', $m)['cur']['deadline']);
+}
+
+function test_match_commit_deadline_forfeits_non_chooser(): void
+{
+    $m = rps_match_new('p_a', 'p_b', 2);
+    [$h] = t_commit('rock');
+    $m = rps_match_commit($m, 1, $h, T0);
+    assert_same($m, rps_match_tick($m, T0 + RPS_COMMIT_SECONDS), 'Frist noch nicht abgelaufen');
+    $m = rps_match_tick($m, T0 + RPS_COMMIT_SECONDS + 1);
+    assert_same([0, 1], $m['score']);
+    assert_same(
+        ['m' => [null, null], 'n' => [null, null], 'h' => [null, $h], 'w' => 1, 'f' => true],
+        $m['history'][0]
+    );
+    assert_same(rps_round_new(), $m['cur']);
+    assert_same(null, rps_match_view('m1', $m)['cur']['commitDeadline']);
+}
+
+function test_match_commit_deadline_can_end_match(): void
+{
+    $m = rps_match_new('p_a', 'p_b', 1);
+    [$h] = t_commit('paper');
+    $m = rps_match_tick(rps_match_commit($m, 0, $h, T0), T0 + RPS_COMMIT_SECONDS + 1);
+    assert_same(0, $m['winner']);
+    assert_same('forfeit', $m['end']);
+}
+
+function test_match_commit_deadline_ignored_for_legacy_round_without_field(): void
+{
+    $m = rps_match_new('p_a', 'p_b', 2);
+    [$h] = t_commit('paper');
+    $m = rps_match_commit($m, 0, $h, T0);
+    unset($m['cur']['firstCommitAt']);
+    assert_same($m, rps_match_tick($m, T0 + 10 * RPS_COMMIT_SECONDS));
 }

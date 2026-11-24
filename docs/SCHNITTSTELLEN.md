@@ -140,6 +140,10 @@ bevor das nächste Ereignis drankommt – „sofort“ = ohne Warteschlange):
 | `reaction` (sofort) | `{ emoji, fromMe }` | Emoji schwebt hoch |
 | `error` (sofort) | `{ message, fatal? }` | deutscher Fehlertext in der Arena |
 
+Zusätzlich (online, alle „sofort“ außer `moveRestored`): `moveRestored { move }`, `deadline { seconds, who }`,
+`claimAvailable { available }`, `rematchStatus { me, opp, oppLeft }`; `matchStart` kann `score`/`history`/`series`
+mitbringen, `matchOver` `replay`/`series`/`oppName`. Details: Abschnitt „Online-Adapter“.
+
 Online-Adapter (Phase 4): `roundResolved` darf schon während des Countdowns kommen (wartet in der
 Warteschlange); `proof` = Gegner-Zug/Nonce/Hash aus `history`, damit der Controller nachprüft.
 
@@ -185,7 +189,8 @@ und fokussiert danach die `h1`.
   "score": [1, 0], "target": 2,
   "cur": {                                        // laufende Runde – NIE mit Zügen
     "committed": [true, false], "revealed": [false, false],
-    "commit": ["<hex>", null], "lockedAt": null | 1764000120, "deadline": null | 1764000140
+    "commit": ["<hex>", null], "lockedAt": null | 1764000120, "deadline": null | 1764000140,
+    "commitDeadline": null | 1764000180          // nur wenn genau einer gewählt hat: der andere muss bis dahin wählen
   },
   "history": [ { "m": ["rock","scissors"], "n": ["<nonce>","<nonce>"], "h": ["<hex>","<hex>"], "w": 0, "f": false } ],
   "dropped": 0,                                   // verdichtete (entfernte) alte Unentschieden, s. u.
@@ -208,7 +213,9 @@ und fokussiert danach die `h1`.
   Runde wird ohne Punkt wiederholt. Endet ein Match durch eine Forfeit-Runde: `end: "forfeit"`.
 - `players` enthält auch Gegangene (`left: true`, nie `online`), außer in der Turnier-Lobby (dort entfernt).
 - Antwort von `commit`, `reveal`, `rematch`, `start`, `react`, `claim`, `leave`: `{ "ok": true, "version": 13 }`.
-- `history` hat höchstens 200 Einträge: darüber werden die ältesten Unentschieden entfernt und in
+- Wahl-Frist: Hat nur einer gewählt, verliert der andere nach `commitDeadline` (60 s) die Runde:
+  history-Eintrag `{ "m": [null,null], "n": [null,null], "h": ["<hex>",null], "w": 0, "f": true }`.
+- `history` hat höchstens 50 Einträge: darüber werden die ältesten Unentschieden entfernt und in
   `dropped` gezählt (Rundenzahl = `dropped + history.length`; neue Runde erkennen am besten daran).
   Entscheidende Runden werden nie entfernt.
 
@@ -233,3 +240,60 @@ und fokussiert danach die `h1`.
 - Forfeit-Runde (nicht rechtzeitig aufgedeckt): fehlender Zug/Nonce ist `null`, `"f": true`.
 - `create` → `{ code, token, me }`, `join` → `{ token, me, spectator }`. Danach immer `state` laden.
 - Alle Fehler: HTTP 4xx/5xx + `{ "error": "Deutscher Text" }`.
+
+## Online-Adapter
+
+`online-opponent.js` implementiert den Gegner-Adapter aus „Arena-Controller“ für Duell und Turnier.
+Er pollt **nicht** selbst: der Raum-Screen (`ui/room.js`) hält den Poller (`net.js`) und reicht
+jeden Zustand weiter.
+
+```js
+createOnlineOpponent({ code, token, me, kind: 'duel'|'tournament', state, matchId?, apiFn, session, poke,
+                       now?, commitHash?, makeNonce? }) → Adapter & {
+  update(state),            // neuer Server-Zustand (onState des Pollers)
+  updateOnline(map),        // { p_id: bool } aus jeder Poll-Antwort (auch „unchanged“)
+  claim() → Promise,        // Sieg beanspruchen (Server prüft 45 s)
+  leave() → Promise,        // API leave + Sitzung löschen
+  matchId,                  // verfolgtes Match (Duell: state.current, Turnier: festes myMatch)
+}
+roundCount(match) = (match.dropped ?? 0) + match.history.length
+newReactions(list, lastId), maxReactionId(list), roundSentence(myMove, oppMove, oppName), CLAIM_AFTER_MS
+```
+
+Ablauf einer Runde:
+1. `roundOpen` sobald eine neue Runde (`roundCount`) beginnt. `submitMove(move)`: Nonce (16 Byte hex) →
+   `commitHash` → Pending `{ matchId, round, move, nonce, hash }` in `sessionStorage`
+   (`rps.pending.<code>`) → `commit` → `poke()`.
+2. `cur.lockedAt` gesetzt → `roundLocked` (Countdown) und automatisch `reveal` mit dem Pending-Zug.
+3. Neue `history`-Einträge → `roundResolved` (Gegnerzug/Nonce/Hash als `proof`, der Controller prüft
+   `verifyCommit` → „fair ✓“). Der Gegnerzug stammt **nur** aus `history`.
+4. `winner`/`end` gesetzt → `matchOver` (`replay: true`, wenn das Match beim Öffnen schon vorbei war →
+   keine Statistik). Duell: `rematchStatus` aus `state.rematch`, Serie aus `state.series`.
+
+Weitere Ereignisse: `opponentStatus` (`choosing`/`ready`/`offline`/`left`), `deadline`
+(`{ seconds, who: 'reveal'|'commit'|'oppCommit' }` aus `cur.deadline` bzw. `cur.commitDeadline`),
+`claimAvailable` (Gegner ≥ 45 s offline), `reaction` (nur neue IDs), `moveRestored` (Reload nach
+eigenem Commit), `error` (deutscher Text; Reaktionen mit 429 werden still ignoriert).
+
+Reload: `rps.token.<code>` + `rps.me.<code>` behalten den Platz; `matchStart` liefert `score` und
+`history` der bisherigen Runden; ein schon abgegebener Zug wird per `moveRestored` angezeigt und nach
+`lockedAt` aus dem Pending aufgedeckt.
+
+Weitere DOM-freie Module dazu:
+- `net.js`: `api`, `ApiError` (`status`, `retryable`), `createPoller({ code, token, onState, onOnline,
+  onError(err, { failures, fatal }), onConnection(ok), apiFn?, timers?, isHidden? })` mit
+  `start/stop/poke/setMode('match'|'idle'|'end')`, `POLL_MS` (1 s / 1 s / 5 s, versteckt ≥ 3 s),
+  Backoff 1→2→4→8→10 s, `RECONNECT_TEXT`; 403/404 sind fatal.
+  `createRoomSession(storage)` → `get/set/clear(code)`, `get/set/clearPending(code)`,
+  `wasRecorded/markRecorded(code, id)` (sessionStorage-Schlüssel `rps.token.`, `rps.me.`,
+  `rps.pending.`, `rps.recorded.` + Code).
+- `bracket.js`: `buildBracket(state, me)` → `{ rounds: [{ index, title, matches: [{ id, label, status,
+  mine, slots: [{ id, name, score, won, me, left, placeholder }] }] }], champion }`,
+  `roundTitle(i, total)` (Finale/Halbfinale/Viertelfinale/Achtelfinale/Runde n),
+  `matchStatus(m)` (`pending`/`live`/`done`/`bye`), `tournamentRole(state, me)`
+  (`spectator`/`playing`/`waiting`/`out`/`champion`).
+
+Screens: `#/duel` und `#/tournament` = Raum erstellen (`ui/create-room.js`), `#<code>` = `ui/room.js`
+(Einladung `ui/invite.js` → Lobby `ui/lobby.js` mit `ui/share.js` → Arena bzw. Turnierbaum
+`ui/bracket-view.js`). Turnier-Statistik: `recordMatch({ mode: 'tournament' })` je Match und
+einmal `recordTournament({ won })` pro beendetem Turnier.

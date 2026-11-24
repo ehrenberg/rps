@@ -13,8 +13,15 @@ const RPS_MAX_BODY_BYTES = 4096;
 /** @return never */
 function rps_respond(int $status, array $body): void
 {
+    try {
+        $json = json_encode($body, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE | JSON_THROW_ON_ERROR);
+    } catch (JsonException $e) {
+        error_log(sprintf('rps api: JsonException %d', $e->getCode()));
+        $status = 500;
+        $json = '{"error":"Interner Fehler. Bitte versuche es gleich noch einmal."}';
+    }
     http_response_code($status);
-    echo json_encode($body, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE);
+    echo $json;
     exit;
 }
 

@@ -64,6 +64,8 @@ play_round() { # $1 Zug Anna, $2 Zug Ben
   local na nb
   na=$(nonce); nb=$(nonce)
   post "{\"action\":\"commit\",\"code\":\"$ROOM\",\"token\":\"$TA\",\"hash\":\"$(sha "$1:$na")\"}"; expect_status 200 "commit A ($1)"
+  post "{\"action\":\"state\",\"code\":\"$ROOM\",\"token\":\"$TB\"}"
+  grep -q '"commitDeadline":[0-9]' <<<"$BODY" || fail "commitDeadline fehlt: $BODY"
   post "{\"action\":\"commit\",\"code\":\"$ROOM\",\"token\":\"$TB\",\"hash\":\"$(sha "$2:$nb")\"}"; expect_status 200 "commit B ($2)"
   post "{\"action\":\"reveal\",\"code\":\"$ROOM\",\"token\":\"$TA\",\"move\":\"$1\",\"nonce\":\"$na\"}"; expect_status 200 "reveal A"
   # Fairness: B darf A's Zug/Nonce jetzt noch nicht sehen.

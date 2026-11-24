@@ -137,6 +137,7 @@ Datenpfad: Konstante `RPS_DATA_DIR` (vorher definierbar), sonst Umgebungsvariabl
     "commit": ["<sha256 hex>", null],
     "move":   [null, null],            // erst nach Reveal gefüllt
     "nonce":  [null, null],
+    "firstCommitAt": null,             // Zeit des ersten Commits (Wahl-Frist für den anderen)
     "lockedAt": null                   // Zeit, zu der beide committed haben
   },
   "history": [ { "m": ["rock","scissors"], "n": ["…","…"], "h": ["…","…"], "w": 0, "f": false } ],
@@ -147,7 +148,7 @@ Datenpfad: Konstante `RPS_DATA_DIR` (vorher definierbar), sonst Umgebungsvariabl
 }
 ```
 
-`history` ist auf 200 Einträge begrenzt: Darüber werden die ältesten Unentschieden entfernt und in
+`history` ist auf 50 Einträge begrenzt: Darüber werden die ältesten Unentschieden entfernt und in
 `dropped` gezählt (Rundenzahl = `dropped + history.length`). Entscheidende Runden bleiben immer erhalten.
 
 **Fristen & Sonderfälle**
@@ -219,7 +220,11 @@ Client A                          Server                         Client B
 ```
 
 - Clients decken automatisch auf, sobald sie `locked` sehen; parallel läuft der Countdown, das Ergebnis wird erst am Ende des Countdowns gezeigt.
-- **Frist:** Deckt jemand 20 s nach `lockedAt` nicht auf, verliert er die Runde (`f: true`). Fristen werden bei jedem Request lazy ausgewertet (kein Cron nötig).
+- **Wahl-Frist:** Sobald genau einer gewählt hat (`firstCommitAt`), hat der andere 60 s Zeit
+  (`cur.commitDeadline`); sonst verliert er die Runde (`f: true`, beide Züge `null`, `h` = [Hash, null]).
+  Verhindert, dass jemand online bleibt und ein Match/Turnier durch Nicht-Wählen ewig blockiert.
+- **Aufdeck-Frist:** Deckt jemand 20 s nach `lockedAt` nicht auf, verliert er die Runde (`f: true`).
+  Fristen werden bei jedem Request lazy ausgewertet (kein Cron nötig).
 - Clients prüfen zusätzlich selbst die Hashes des Gegners aus `history` und zeigen ein Schloss-Symbol „fair ✓“.
 - `crypto.subtle` braucht HTTPS bzw. localhost; `crypto.js` hat einen reinen JS-SHA-256-Fallback.
 
@@ -232,10 +237,18 @@ Client A                          Server                         Client B
 
 ## Aufräumen (24 h)
 
-- Bei jedem `create` und zusätzlich mit 5 % Wahrscheinlichkeit bei anderen Requests:
-  `DELETE FROM rooms WHERE updated < now - 86400`.
-- Gelegentlich `VACUUM` (z. B. 1 % bei `create`).
-- Obergrenze 5 000 Räume; darüber lehnt `create` freundlich ab.
+- Bei jedem `create` und zusätzlich mit 5 % Wahrscheinlichkeit bei anderen Requests wird gelöscht:
+  Räume, die **vor mehr als 24 h erstellt** wurden (hart, auch wenn noch gespielt wird),
+  Räume, die 24 h unverändert sind, und Lobby-Räume (`status = 'lobby'`), die 60 min unverändert sind.
+  Abgelaufene Räume gelten schon beim Laden als nicht vorhanden (404), auch vor dem Aufräumen.
+- Die Spalte `status` (Kopie von `data.status`) erlaubt diese Abfragen ohne JSON-Parsing;
+  alte Datenbanken bekommen sie automatisch per `ALTER TABLE`.
+- `PRAGMA secure_delete = ON` (gelöschte Inhalte werden überschrieben),
+  `PRAGMA auto_vacuum = INCREMENTAL` (wirkt nur bei neu angelegter DB-Datei); nach jedem Aufräumen
+  mit Treffern `PRAGMA incremental_vacuum(64)` statt eines blockierenden `VACUUM`.
+- Obergrenze 5 000 Räume. `create` zählt, räumt auf und fügt in **einer** `BEGIN IMMEDIATE`-Transaktion ein.
+  Ist das Limit erreicht, werden zuerst inaktive Lobby-Räume (≥ 10 min unverändert, älteste zuerst)
+  verdrängt; erst wenn das nicht reicht, lehnt `create` freundlich ab (503).
 
 ## Computer-KI (`ai.js`)
 
