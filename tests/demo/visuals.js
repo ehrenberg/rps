@@ -129,7 +129,7 @@ for (const name of audio.SOUND_NAMES ?? []) $('#sound-buttons').append(button(na
 
 // ---------- Schalter ----------
 $('#reduced').addEventListener('change', (e) => {
-  document.documentElement.dataset.reducedFx = e.target.checked ? '1' : '0';
+  document.documentElement.dataset.reducedFx = e.target.checked ? '1' : '';
   fx.setReducedFx(e.target.checked);
 });
 $('#sound').checked = audio.isEnabled();
