@@ -20,7 +20,7 @@ if ((${#php_files[@]})); then
   dockerx php:8.1-cli sh -c 'for f; do php -l "$f" >/dev/null || exit 1; done' _ "${php_files[@]}"
 fi
 
-if git diff --cached --name-only --diff-filter=ACM | grep -qE '\.(js|mjs)$'; then
+if git diff --cached --name-only --diff-filter=ACM | grep -qE '\.(js|mjs|php|json)$'; then
   node --test tests/js/ >/dev/null
 fi
 echo "✔ pre-commit: gitleaks, php -l (8.1), JS-Tests ok"

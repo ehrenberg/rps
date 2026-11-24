@@ -23,7 +23,7 @@ const RPS_CODE_LENGTH = 6;
 const RPS_NAME_MAX = 20;            // Grapheme (sichtbare Zeichen)
 const RPS_NAME_MAX_CODEPOINTS = 80; // hartes Limit gegen Combining-Spam
 const RPS_WATCH_MAX = 10;           // Räume pro `watch`-Request
-const RPS_EMOJIS =['👍', '😂', '😱', '🔥', '😭', '🤝', '👏', '😈'];
+const RPS_EMOJIS = ['👍', '😂', '😱', '🔥', '😭', '🤝', '👏', '😈'];
 
 /** Zufällige Zeichenkette aus dem Raumcode-Alphabet (CSPRNG). */
 function rps_random_chars(int $length): string
