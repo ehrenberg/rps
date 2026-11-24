@@ -26,6 +26,7 @@ Registrierung, keine Cookies, keine externen Ressourcen.
 npm run setup   # einmalig: Git-Hooks (gitleaks)
 npm run up      # Docker: Apache + PHP 8.1 → http://localhost:8088
 npm test        # alle Tests
+npm install && npm run test:e2e   # E2E (Playwright) gegen laufenden Server, URL per RPS_BASE_URL
 ```
 
 Voraussetzungen: Docker (mit Compose) und Node ≥ 20 (nur für Tests). Details: [docs/ENTWICKLUNG.md](docs/ENTWICKLUNG.md).

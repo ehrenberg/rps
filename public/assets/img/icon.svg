@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#3b1d8f"/>
+      <stop offset="1" stop-color="#140b33"/>
+    </linearGradient>
+    <radialGradient id="glow" cx=".3" cy=".25" r=".8">
+      <stop offset="0" stop-color="#ff5d8f" stop-opacity=".55"/>
+      <stop offset="1" stop-color="#ff5d8f" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="64" height="64" rx="15" fill="url(#bg)"/>
+  <rect width="64" height="64" rx="15" fill="url(#glow)"/>
+  <!-- Kreislauf: wer schlägt wen -->
+  <g fill="none" stroke="#fff" stroke-opacity=".85" stroke-width="3" stroke-linecap="round">
+    <path d="M27 17.5a17 17 0 0 0-11.5 19"/>
+    <path d="M20.5 47a17 17 0 0 0 23 0"/>
+    <path d="M48.5 36.5a17 17 0 0 0-11.5-19"/>
+  </g>
+  <g fill="#fff" fill-opacity=".85">
+    <path d="M12.5 33.5l3 5.5 3.5-5z"/>
+    <path d="M41 43.5l3.5 3.5-5.5 2.5z"/>
+    <path d="M38.5 13.5l-1 6-4.5-3.5z"/>
+  </g>
+  <circle cx="32" cy="15" r="7" fill="#ffd23f"/>
+  <circle cx="16" cy="43" r="7" fill="#3ad1ff"/>
+  <circle cx="48" cy="43" r="7" fill="#ff5d8f"/>
+</svg>

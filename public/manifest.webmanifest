@@ -1,0 +1,16 @@
+{
+  "name": "Schere Stein Papier",
+  "short_name": "SSP",
+  "description": "Schere, Stein, Papier – gegen den Computer, online oder im Turnier.",
+  "lang": "de",
+  "start_url": "./#/",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0d0726",
+  "theme_color": "#140b33",
+  "icons": [
+    { "src": "assets/img/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "assets/img/icon-maskable.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "maskable" }
+  ]
+}

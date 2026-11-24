@@ -85,6 +85,68 @@ createPoller({ code, token, onState, onError, onOnline }) → { start(), stop(),
 `rps.name`, `rps.sound`, `rps.reducedFx`, `rps.stats.v1`, `rps.ai.history.v1`,
 `rps.token.<code>` + `rps.me.<code>` (sessionStorage).
 
+## Arena-Controller
+
+Trennung: **Gegner-Adapter** (Spiellogik, DOM-frei) → **Controller** `arena.js` (Ablauf, Statistik,
+Fairness-Prüfung, DOM-frei) → **Ansicht** `ui/arena-view.js` (DOM, Animation, Sound, Partikel).
+Computer jetzt (`cpu-opponent.js`), Online später: nur ein neuer Adapter, Controller und Ansicht bleiben.
+
+```js
+// arena.js
+createArenaController({ adapter, view, stats?, verify? = verifyCommit }) → {
+  phase,                      // 'waiting' | 'choosing' | 'submitted' | 'playing' | 'over'
+  start(), choose(move) → bool, rematch() → bool, react(emoji), dispose(),
+  onPhase(fn) → unsubscribe, idle() → Promise   // idle: alle bisherigen Ereignisse abgearbeitet
+}
+moveForKey(key, variant) → move | null           // '1'…'5' bzw. s/p/c/e/k (Stein/Papier/sChere/Echse/spocK)
+MOVE_LETTERS, PHASE
+
+// Gegner-Adapter (OpponentAdapter)
+{
+  info: { kind: 'cpu'|'online', statsMode /* 'cpu-1'…'cpu-4'|'duel'|'tournament' */, variant, bestOf,
+          features: { status, reactions, commitBadge, insight } },
+  start(handler),            // handler(type, payload) – Ereignisse siehe unten
+  submitMove(move) → Promise,// eigener Zug (online: commitHash + Nonce senden)
+  rematch(),                 // Nochmal / Revanche anfragen
+  sendReaction(emoji),       // nur wenn features.reactions
+  dispose(),                 // Timer/Polling stoppen
+}
+```
+
+Ereignisse Adapter → Controller (in Reihenfolge abgearbeitet; jede Animation läuft zu Ende,
+bevor das nächste Ereignis drankommt – „sofort“ = ohne Warteschlange):
+
+| Ereignis | Payload | Wirkung |
+|---|---|---|
+| `matchStart` | `{ variant, bestOf, target, oppName, oppDetail?, series? }` | Arena aufbauen, Pips leeren |
+| `opponentStatus` (sofort) | `{ state: 'choosing'\|'ready'\|'offline'\|'left' }` | „wählt …“ / „bereit ✓“ (nur wenn `features.status`) |
+| `roundOpen` | `{ round, commit: hex\|null }` | Zug-Buttons frei, Commit-Badge „🔒 a3f9…“ |
+| `roundLocked` | `{}` | beide haben gewählt → Countdown (3 Aufschläge à 500 ms) |
+| `roundResolved` | `{ number, myMove, oppMove, outcome: 1\|0\|-1, result: 'w'\|'d'\|'l', sentence, score: [ich, Gegner], proof: {hash, move, nonce}\|null, forfeit? }` | Aufdecken, Pips, Verlauf, `stats.recordRound`, `verifyCommit` → „fair ✓“ |
+| `insight` | `{ text }` | „Was denkt der Computer?“ (nur `features.insight`) |
+| `matchOver` | `{ winner: 'me'\|'opp', score, reason }` | `stats.recordMatch({ mode: info.statsMode })`, Matchende-Overlay |
+| `reaction` (sofort) | `{ emoji, fromMe }` | Emoji schwebt hoch |
+| `error` (sofort) | `{ message, fatal? }` | deutscher Fehlertext in der Arena |
+
+Online-Adapter (Phase 4): `roundResolved` darf schon während des Countdowns kommen (wartet in der
+Warteschlange); `proof` = Gegner-Zug/Nonce/Hash aus `history`, damit der Controller nachprüft.
+
+### Weitere DOM-freie Module
+- `match.js`: `createMatch({ variant, bestOf })`, `playRound(match, myMove, oppMove) → { match, round }`,
+  `isOver(match)`, `nextRoundNumber(match)`, `ME`, `OPP`, `RESULT_CODE` – unveränderlicher Zustand.
+- `cpu-opponent.js`: `createCpuOpponent({ level, variant, bestOf }, { createAI?, storage? })` → Adapter.
+  Legt `ai.pick()` + `commitHash(move, randomHex())` **vor** der Spielerwahl fest.
+- `router.js`: `parseHash(hash) → { name, params }`, `hrefFor(name, params)`, `ROUTES`, `ROOM_CODE_RE`.
+  Routen: `#/` home, `#/cpu`, `#/play`, `#/stats`, `#/settings`, `#/duel`, `#/tournament`, `#k7f3qa` room.
+- `settings.js`: `createSettings(storage)` → `get/setName`, `get/setReducedFx`, `get/setInsight`,
+  `get/setCpuSetup`; `sanitizeName`, `normalizeCpuSetup`, `safeStorage`. Schlüssel: `rps.name`,
+  `rps.reducedFx`, `rps.insight`, `rps.cpuSetup.v1`.
+
+### Screens (`ui/`)
+Jeder Screen exportiert `title` und `render(ctx) → { el, focus?, dispose? }`;
+`ctx = { settings, prefs, announce, navigate, params }`. `main.js` wechselt per View Transition
+und fokussiert danach die `h1`.
+
 ## Server-API: Antwort von `state`
 
 ```jsonc
