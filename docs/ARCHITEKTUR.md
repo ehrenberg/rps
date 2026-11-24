@@ -59,7 +59,7 @@ rps/
 │   │   ├── room.php            Raum, Spieler, Token, Online, Reaktionen, Claim
 │   │   ├── duel.php            Duell: Beitritt, Revanche, Serie, Verlassen
 │   │   ├── tournament.php      Turnier: Setzung, K.-o.-Baum, Freilose, Champion
-│   │   ├── view.php            Sicht des Spielers (state-Antwort)
+│   │   ├── view.php            Sicht des Spielers (state), Kurzfassung (watch)
 │   │   └── rules.php           Spiegel von rules.js
 │   └── data/                   SQLite-Datei (per .htaccess gesperrt)
 │       └── .htaccess
@@ -187,6 +187,7 @@ Fehler: HTTP-Status + `{"error":"text"}` (deutscher Text, direkt anzeigbar).
 | `info` | `code` | Nur lesend, ohne Token: öffentliche Rauminfo für die Einladungsseite (keine IDs/Tokens). → `{code, type, variant, bestOf, status, hostName, players, maxPlayers, joinable, spectate, names?}` |
 | `join` | `code, name` | Raum beitreten (Duell max. 2, Turnier max. 16 Teilnehmer; im laufenden/beendeten oder vollen Turnier → Zuschauer, insgesamt max. 32). → `{token, me, spectator}` |
 | `state` | `code, token, since?` | Wertet Fristen aus, aktualisiert `seen` (nur wenn > 5 s alt, ohne `version` zu erhöhen), liefert Sicht des Spielers. Bei `since == version` nur `{version, unchanged:true, now, online:{…}}` |
+| `watch` | `rooms: [{code, token, since?}]` (1–10) | Sammelabfrage für „Meine Spiele“: je Raum wie `state` (Fristen, `seen`, eigene kurze Transaktion), aber nur Kurzfassung. → `{now, rooms:{<code>: Summary \| {version, unchanged:true} \| {gone:true, reason}}}`; `reason` = `notFound` / `forbidden` / `left`. Nur Strukturfehler → 400 (mehr als 10 → „Zu viele Räume auf einmal.“) |
 | `commit` | `code, token, hash` | Verdeckter Zug für laufende Runde des eigenen Matches → `{ok, version}` |
 | `reveal` | `code, token, move, nonce` | Aufdecken; Server prüft `sha256(move + ":" + nonce) == commit` → `{ok, version}` |
 | `rematch` | `code, token` | Duell: Revanche-Wunsch; wenn beide → neues Match → `{ok, version}` |
@@ -235,6 +236,10 @@ Client A                          Server                         Client B
 - Intervall 1 s während Match/Lobby, 3 s wenn Tab versteckt (`visibilitychange`), 5 s auf Matchende-Screen.
 - `since=version` spart Rendern; `online`-Status wird trotzdem mitgeliefert (`seen` < 15 s = online).
 - `seen` wird nur geschrieben, wenn älter als 5 s (weniger Schreibzugriffe).
+- „Meine Spiele“: ein Hintergrund-Wächter fragt alle offenen Räume gebündelt per `watch` ab (~4 s, max. 10
+  Räume pro Request). `watch` zählt als Anwesenheit (gleiche 5-s-Regel) und wertet Fristen aus; ohne fällige
+  Frist und mit frischem `seen` wird nichts geschrieben. Zehn Einträge mit `since` sind ≈ 1,1 KB – das
+  Body-Limit von 4 KB bleibt.
 - Bei Netzwerkfehlern: Backoff bis 10 s, Hinweis „Verbindung wird wiederhergestellt …“.
 
 ## Aufräumen (24 h)

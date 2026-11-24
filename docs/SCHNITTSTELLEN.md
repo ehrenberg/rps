@@ -270,6 +270,46 @@ und fokussiert danach die `h1`.
 - `create` → `{ code, token, me }`, `join` → `{ token, me, spectator }`. Danach immer `state` laden.
 - Alle Fehler: HTTP 4xx/5xx + `{ "error": "Deutscher Text" }`.
 
+### `watch` (Sammelabfrage für „Meine Spiele“)
+
+```jsonc
+// POST
+{ "action": "watch", "rooms": [ { "code": "k7f3qa", "token": "<hex64>", "since": 12 /* optional */ } ] }
+// 200
+{
+  "now": 1764000123,
+  "rooms": {                                   // immer Objekt; Schlüssel = Code genau wie gesendet
+    "k7f3qa": {
+      "version": 12,
+      "type": "duel" | "tournament", "variant": "classic" | "lizard", "bestOf": 3 | 5,
+      "status": "lobby" | "running" | "finished",
+      "me": "p_ab12", "isHost": true,
+      "players": 2,              // aktive Teilnehmer (ohne Zuschauer/Gegangene)
+      "spectator": false,
+      "left": false,             // immer false – wer gegangen ist, bekommt {gone, reason:"left"}
+      "opponent": "Ben" | null,  // Duell: der andere Spieler, sobald beigetreten; Turnier: Gegner in myMatch
+      "myMatch": "m3" | null,    // wie in `state` (nur spielbar)
+      "needsMove": true,         // myMatch existiert und ich habe in der laufenden Runde noch nicht gewählt
+      "rematchWanted": true,     // Duell: Match vorbei, Gegner will Revanche, ich noch nicht
+      "champion": "Anna" | null, // Turnier beendet: Name
+      "updated": 1764000100      // letzte Speicherung des Raums (auch reine seen-Updates)
+    },
+    "m2p4xa": { "version": 7, "unchanged": true },          // since == version
+    "zzzzzz": { "gone": true, "reason": "notFound" },       // unbekannt oder nach 24 h gelöscht
+    "q9w8e7": { "gone": true, "reason": "forbidden" },      // Token unbekannt, Code/Token-Format ungültig
+    "abc234": { "gone": true, "reason": "left" }            // ich habe den Raum verlassen
+  }
+}
+```
+- 1–10 Einträge; mehr → 400 „Zu viele Räume auf einmal.“. Kein Array, leere Liste, Eintrag ohne
+  String-`code` → 400. Alles andere betrifft nur den einzelnen Eintrag.
+- Doppelte Codes: der **letzte** Eintrag zählt (er steht dann auch an seiner Position in `rooms`).
+- `since` muss eine ganze Zahl sein, sonst wird es ignoriert (wie bei `state`). `left` hat Vorrang vor `unchanged`.
+- Turnier-Lobby: Wer dort geht, wird entfernt → danach `forbidden` (nicht `left`).
+- Zählt als Anwesenheit (`seen`, gleiche 5-s-Regel wie `state`) und wertet fällige Fristen aus;
+  jeder Raum in eigener kurzer Transaktion, geschrieben wird nur bei Bedarf.
+- Enthält nie Züge, Nonces, Hashes oder fremde Tokens/IDs außer der eigenen (`me`).
+
 ## Online-Adapter
 
 `online-opponent.js` implementiert den Gegner-Adapter aus „Arena-Controller“ für Duell und Turnier.

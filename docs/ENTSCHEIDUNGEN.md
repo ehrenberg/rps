@@ -96,3 +96,14 @@ nur PHP + SQLite (bash/tar nutzt nur die SSH-Sitzung beim Ausrollen).
 statischen Start-Graphen per `modulepreload` (Test: `tests/js/preload.test.js`).
 **Begründung:** Gemessen (375×812, DPR 3, CPU 4×, 150 ms RTT, 1,6 Mbit/s): Startseite sichtbar nach
 1,2 s statt 2,1 s, 20 statt 41 Requests bis dahin. Kein Build-Schritt nötig.
+
+### 2026-11-24 – „Meine Spiele“: Plätze in localStorage, Benachrichtigung beim Beitritt
+**Entscheidung (Basti):** Raum-Tokens liegen in `localStorage` (`rps.rooms.v1`) statt `sessionStorage`,
+Einträge verfallen nach 24 h (wie die Räume auf dem Server). Eine Liste „Meine Spiele“ zeigt alle offenen
+Räume; ein Hintergrund-Wächter fragt sie per Sammel-Action `watch` ab und benachrichtigt, wenn ein Gegner
+beitritt oder ein Turnier-Match startet: Toast mit Sprung-Button + Sound, Badge, blinkender Tab-Titel und –
+nach einmaliger Zustimmung – System-Benachrichtigung (Notification API, ohne Service Worker).
+**Begründung:** Bisher war ein wartendes Spiel nach einem Abstecher in die Einstellungen „weg“ (nur per Link
+wiederzufinden), und mehrere parallele Spiele waren nicht möglich. Konsequenz: Gleicher Link in zweitem Tab =
+derselbe Spieler; zum Testen mit zwei Spielern im selben Browser ein privates Fenster nutzen.
+Ersetzt den Eintrag „Token in sessionStorage, keine Cookies“ (Cookies bleiben tabu).

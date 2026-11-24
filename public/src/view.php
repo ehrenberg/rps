@@ -1,5 +1,5 @@
 <?php
-// Sicht eines Spielers auf den Raum (Antwort von `state`). Keine geheimen Daten (Tokens, offene Züge).
+// Sicht eines Spielers auf den Raum (Antwort von `state`, Kurzfassung für `watch`). Keine geheimen Daten (Tokens, offene Züge).
 declare(strict_types=1);
 
 require_once __DIR__ . '/duel.php';
@@ -89,4 +89,68 @@ function rps_room_info(array $room, string $code): array
         $info['names'] = array_map(static fn(string $id): string => $room['players'][$id]['name'], $participants);
     }
     return $info;
+}
+
+/**
+ * Kurzfassung eines Raums für „Meine Spiele“ (Antwort von `watch` je Raum). Enthält nie Züge,
+ * Nonces, Hashes oder Tokens. Wer gegangen ist → {gone, reason: "left"}; bei since == version
+ * nur {version, unchanged}.
+ * @param int $updated Zeit der letzten Speicherung des Raums
+ */
+function rps_room_summary(array $room, int $version, string $me, int $updated, ?int $since = null): array
+{
+    $player = $room['players'][$me];
+    if ($player['left']) {
+        return ['gone' => true, 'reason' => 'left'];
+    }
+    if ($since === $version) {
+        return ['version' => $version, 'unchanged' => true];
+    }
+    $isDuel = $room['type'] === 'duel';
+    $myMatch = rps_room_my_match($room, $me);
+    $match = $myMatch === null ? null : $room['matches'][$myMatch];
+    $idx = $match === null ? null : rps_match_index($match, $me);
+    $champion = $room['champion'] === null ? null : ($room['players'][$room['champion']]['name'] ?? null);
+    return [
+        'version' => $version,
+        'type' => $room['type'],
+        'variant' => $room['variant'],
+        'bestOf' => $room['bestOf'],
+        'status' => $room['status'],
+        'me' => $me,
+        'isHost' => $room['host'] === $me,
+        'players' => count($isDuel ? rps_room_active_ids($room) : rps_tournament_participants($room)),
+        'spectator' => $player['spectator'],
+        'left' => false,
+        'opponent' => rps_summary_opponent($room, $me, $match, $idx),
+        'myMatch' => $myMatch,
+        'needsMove' => $match !== null && $match['cur']['commit'][$idx] === null,
+        'rematchWanted' => $isDuel && rps_summary_rematch_wanted($room, $me),
+        'champion' => $champion,
+        'updated' => $updated,
+    ];
+}
+
+/** Duell: der andere Spieler (falls schon da); Turnier: Gegner im eigenen spielbaren Match. */
+function rps_summary_opponent(array $room, string $me, ?array $match, ?int $idx): ?string
+{
+    if ($room['type'] === 'duel') {
+        foreach ($room['order'] as $id) {
+            if ($id !== $me) {
+                return $room['players'][$id]['name'];
+            }
+        }
+        return null;
+    }
+    return $match === null ? null : $room['players'][$match['p'][1 - $idx]]['name'];
+}
+
+/** Duell: aktuelles Match vorbei, Gegner will Revanche, ich noch nicht. */
+function rps_summary_rematch_wanted(array $room, string $me): bool
+{
+    $current = $room['current'] === null ? null : ($room['matches'][$room['current']] ?? null);
+    if ($room['status'] !== 'running' || $current === null || !rps_match_over($current)) {
+        return false;
+    }
+    return $room['rematch'] !== [] && !in_array($me, $room['rematch'], true);
 }

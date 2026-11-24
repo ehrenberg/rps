@@ -22,7 +22,8 @@ const RPS_CODE_ALPHABET = '23456789abcdefghjkmnpqrstuvwxyz';
 const RPS_CODE_LENGTH = 6;
 const RPS_NAME_MAX = 20;            // Grapheme (sichtbare Zeichen)
 const RPS_NAME_MAX_CODEPOINTS = 80; // hartes Limit gegen Combining-Spam
-const RPS_EMOJIS = ['👍', '😂', '😱', '🔥', '😭', '🤝', '👏', '😈'];
+const RPS_WATCH_MAX = 10;           // Räume pro `watch`-Request
+const RPS_EMOJIS =['👍', '😂', '😱', '🔥', '😭', '🤝', '👏', '😈'];
 
 /** Zufällige Zeichenkette aus dem Raumcode-Alphabet (CSPRNG). */
 function rps_random_chars(int $length): string
@@ -235,4 +236,34 @@ function rps_valid_emoji(mixed $emoji): string
         throw new RpsError('Diese Reaktion gibt es nicht.', 400);
     }
     return $emoji;
+}
+
+/**
+ * Prüft die Struktur der `watch`-Liste (1–10 Objekte mit String-`code`). Code und Token werden hier
+ * NICHT geprüft – ein ungültiger Eintrag soll nur sich selbst betreffen. Doppelte Codes: der letzte
+ * Eintrag zählt. Nicht-Integer-`since` wird ignoriert (wie bei `state`).
+ * @return array<string,array{code:string,token:mixed,since:?int}> Schlüssel = Code wie gesendet
+ */
+function rps_valid_watch_list(mixed $rooms): array
+{
+    if (!is_array($rooms) || !array_is_list($rooms) || $rooms === []) {
+        throw new RpsError('Ungültige Anfrage (Raumliste erwartet).', 400);
+    }
+    if (count($rooms) > RPS_WATCH_MAX) {
+        throw new RpsError('Zu viele Räume auf einmal.', 400);
+    }
+    $entries = [];
+    foreach ($rooms as $entry) {
+        if (!is_array($entry) || array_is_list($entry) || !is_string($entry['code'] ?? null)) {
+            throw new RpsError('Ungültige Anfrage (Raumeintrag mit Code erwartet).', 400);
+        }
+        $code = $entry['code'];
+        unset($entries[$code]);   // letzter zählt – auch in der Reihenfolge
+        $entries[$code] = [
+            'code' => $code,
+            'token' => $entry['token'] ?? null,
+            'since' => isset($entry['since']) && is_int($entry['since']) ? $entry['since'] : null,
+        ];
+    }
+    return $entries;
 }
