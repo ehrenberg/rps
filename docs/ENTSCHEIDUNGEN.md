@@ -38,3 +38,16 @@ mit gitleaks, lintet PHP auf 8.1 und führt die JS-Tests aus.
 **Begründung:** Wunsch von Basti. Reproduzierbar auf jedem Rechner, testet gegen die
 Produktions-Mindestversion statt gegen die zufällig installierte PHP-Version und prüft CSP,
 Header und Zugriffssperren schon lokal. Produktion bleibt unverändert: `public/` per FTP.
+
+### 2026-11-24 – Beide decken nicht auf → Runde wird wiederholt
+**Entscheidung:** Läuft die 20-s-Frist ab, ohne dass einer der beiden aufgedeckt hat, zählt die
+Runde nicht (`w: -1, f: true`). Deckt nur einer nicht auf, verliert er die Runde.
+**Begründung:** Ein gemeinsamer Verbindungsabbruch soll niemanden bestrafen. Wer dauerhaft weg
+ist, wird über `claim` (Gegner > 45 s offline) erledigt.
+
+### 2026-11-24 – Turnier: Sieger rücken sofort nach
+**Entscheidung:** Ein Turniermatch startet, sobald seine beiden Vorgänger entschieden sind –
+nicht erst, wenn die ganze Runde fertig ist. Der komplette Baum (`bracket`) steht ab Start fest.
+Gegangene verlieren automatisch, Zuschauer werden beim nächsten Turnier Teilnehmer.
+**Begründung:** Weniger Wartezeit für schnelle Spieler, und das Frontend kann den Baum von
+Anfang an vollständig zeichnen.

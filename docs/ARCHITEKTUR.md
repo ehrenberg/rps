@@ -42,9 +42,15 @@ rps/
 │   │       └── ui/…            Screens (home, lobby, bracket, stats, …)
 │   ├── src/                    PHP-Logik (per .htaccess gesperrt)
 │   │   ├── .htaccess           "Require all denied"
-│   │   ├── db.php              PDO/SQLite, Schema, Transaktionen, Cleanup
-│   │   ├── room.php            Räume, Spieler, Turnierbaum
-│   │   ├── match.php           Commit-Reveal, Runden, Wertung
+│   │   ├── handler.php         Aktionen: Eingabe → Logik → DB (ohne HTTP, testbar)
+│   │   ├── db.php              PDO/SQLite, Schema, Transaktionen, Cleanup (einziger Ort mit SQL)
+│   │   ├── game.php            lädt die reine Spiellogik:
+│   │   ├── validate.php        RpsError, Eingabeprüfung (Name, Code, Hash, Emoji …)
+│   │   ├── match.php           Commit-Reveal, Runden, Wertung, Frist
+│   │   ├── room.php            Raum, Spieler, Token, Online, Reaktionen, Claim
+│   │   ├── duel.php            Duell: Beitritt, Revanche, Serie, Verlassen
+│   │   ├── tournament.php      Turnier: Setzung, K.-o.-Baum, Freilose, Champion
+│   │   ├── view.php            Sicht des Spielers (state-Antwort)
 │   │   └── rules.php           Spiegel von rules.js
 │   └── data/                   SQLite-Datei (per .htaccess gesperrt)
 │       └── .htaccess
@@ -77,6 +83,8 @@ CREATE INDEX rooms_updated ON rooms(updated);
 
 Jede schreibende Aktion: `BEGIN IMMEDIATE` → Raum laden → ändern → speichern → `COMMIT`.
 `PRAGMA busy_timeout = 3000`, `journal_mode = WAL` (falls vom Hosting unterstützt, sonst DELETE).
+`version` steigt nur bei inhaltlichen Änderungen; reine `seen`-Updates werden ohne neue Version gespeichert.
+Datenpfad: Konstante `RPS_DATA_DIR` (vorher definierbar), sonst Umgebungsvariable `RPS_DATA_DIR`, sonst `public/data`.
 
 ### Raum-JSON
 
@@ -87,7 +95,8 @@ Jede schreibende Aktion: `BEGIN IMMEDIATE` → Raum laden → ändern → speich
   "bestOf": 3 | 5,
   "host": "p_ab12",                       // öffentliche Spieler-ID
   "players": {
-    "p_ab12": { "name": "Anna", "tokenHash": "…", "joined": 1764000000, "seen": 1764000123 }
+    "p_ab12": { "name": "Anna", "tokenHash": "…", "joined": 1764000000, "seen": 1764000123,
+                "spectator": false, "left": false, "lastReact": null }
   },
   "order": ["p_ab12", "p_cd34"],          // Beitrittsreihenfolge
   "matches": { "m1": { /* Match */ } },
@@ -97,7 +106,9 @@ Jede schreibende Aktion: `BEGIN IMMEDIATE` → Raum laden → ändern → speich
   "bracket": [["m1","m2"],["m3"]],        // Turnier: Runden → Match-IDs
   "status": "lobby" | "running" | "finished",
   "champion": null,
-  "reactions": [ { "id": 17, "from": "p_ab12", "emoji": "🔥", "t": 1764000100 } ] // letzte 30
+  "reactions": [ { "id": 17, "from": "p_ab12", "emoji": "🔥", "t": 1764000100 } ], // letzte 30
+  "nextMatch": 4,                         // Zähler für Match-IDs (laufen im Raum weiter)
+  "nextReaction": 18
 }
 ```
 
@@ -114,10 +125,28 @@ Jede schreibende Aktion: `BEGIN IMMEDIATE` → Raum laden → ändern → speich
     "nonce":  [null, null],
     "lockedAt": null                   // Zeit, zu der beide committed haben
   },
-  "history": [ { "m": ["rock","scissors"], "w": 0 } ],  // w: 0/1 = Sieger, -1 = unentschieden, Forfeit mit "f": true
-  "winner": null                       // 0 | 1
+  "history": [ { "m": ["rock","scissors"], "n": ["…","…"], "h": ["…","…"], "w": 0, "f": false } ],
+                                       // w: 0/1 = Sieger, -1 = unentschieden (Runde wird wiederholt)
+  "winner": null,                      // 0 | 1
+  "end": null,                         // "score" | "forfeit" | "bye" | "claim" | "leave"
+  "from": null                         // Turnier-Platzhalter: ["m1","m2"] = Sieger dieser Matches
 }
 ```
+
+**Fristen & Sonderfälle**
+- Deckt nur einer innerhalb von 20 s auf, gewinnt er die Runde (`f: true`, fehlender Zug/Nonce `null`).
+  Decken **beide** nicht auf, wird die Runde ohne Punkt neu gestartet (`w: -1`, `f: true`) –
+  so verliert niemand durch einen gemeinsamen Verbindungsabbruch; Dauer-Abwesenheit löst `claim`.
+  Endet ein Match durch eine Forfeit-Runde, ist `end = "forfeit"`.
+- Duell: `status` bleibt `running` zwischen Matches (Revanche); `finished`, sobald jemand geht.
+  Alte Duell-Matches werden auf die letzten 5 gekürzt.
+- Turnier: Der ganze Baum entsteht beim Start (spätere Runden als Platzhalter mit `from`).
+  Sieger rücken **sofort** nach, d. h. ein Match der nächsten Runde startet, sobald beide
+  Vorgänger fertig sind – nicht erst, wenn die ganze Runde durch ist.
+  Gegangene verlieren laufende und künftige Matches (`end = "leave"`); bleibt ein Platz leer
+  (Vorgänger ohne Sieger), bekommt der andere ein Freilos.
+  In der Lobby wird ein gehender Spieler ganz entfernt. Neues Turnier (`start` bei `finished`):
+  Gegangene fliegen raus, Zuschauer werden Teilnehmer (max. 16, Beitrittsreihenfolge).
 
 ### Spieler-Identität ohne Login
 
@@ -129,20 +158,25 @@ Jede schreibende Aktion: `BEGIN IMMEDIATE` → Raum laden → ändern → speich
 
 ## API
 
-Ein Endpunkt: `POST /api.php`, Body JSON, Antwort JSON. Fehler: HTTP 4xx + `{"error":"text"}` (deutscher Text, direkt anzeigbar).
+Ein Endpunkt: `POST /api.php`, Body JSON (max. 4 KB), Antwort JSON (`Cache-Control: no-store`).
+Fehler: HTTP-Status + `{"error":"text"}` (deutscher Text, direkt anzeigbar).
 
 | `action` | Parameter | Wirkung |
 |---|---|---|
-| `create` | `type, name, variant, bestOf` | Neuer Raum, Ersteller = Host. → `{code, token, me}` |
-| `join` | `code, name` | Raum beitreten (Duell max. 2, Turnier max. 16; im laufenden Turnier → Zuschauer). → `{token, me}` |
-| `state` | `code, token, since?` | Aktualisiert `seen`, wertet Fristen aus, liefert Sicht des Spielers. Bei `since == version` nur `{version, unchanged:true, online:{…}}` |
-| `commit` | `code, token, hash` | Verdeckter Zug für laufende Runde des eigenen Matches |
-| `reveal` | `code, token, move, nonce` | Aufdecken; Server prüft `sha256(move + ":" + nonce) == commit` |
-| `rematch` | `code, token` | Duell: Revanche-Wunsch; wenn beide → neues Match |
-| `start` | `code, token` | Turnier: nur Host, ab 3 Spielern; auch für „neues Turnier“ |
-| `react` | `code, token, emoji` | Emoji aus fester Liste, max. 1 pro Sekunde pro Spieler |
-| `claim` | `code, token` | Sieg beanspruchen, wenn Gegner > 45 s offline |
-| `leave` | `code, token` | Raum verlassen (Duell: Gegner gewinnt laufendes Match) |
+| `create` | `type, name, variant?, bestOf?` | Neuer Raum, Ersteller = Host (Default `classic`, 3). → `{code, token, me}` |
+| `join` | `code, name` | Raum beitreten (Duell max. 2, Turnier max. 16 Teilnehmer; im laufenden/beendeten oder vollen Turnier → Zuschauer, insgesamt max. 32). → `{token, me, spectator}` |
+| `state` | `code, token, since?` | Wertet Fristen aus, aktualisiert `seen` (nur wenn > 5 s alt, ohne `version` zu erhöhen), liefert Sicht des Spielers. Bei `since == version` nur `{version, unchanged:true, now, online:{…}}` |
+| `commit` | `code, token, hash` | Verdeckter Zug für laufende Runde des eigenen Matches → `{ok, version}` |
+| `reveal` | `code, token, move, nonce` | Aufdecken; Server prüft `sha256(move + ":" + nonce) == commit` → `{ok, version}` |
+| `rematch` | `code, token` | Duell: Revanche-Wunsch; wenn beide → neues Match → `{ok, version}` |
+| `start` | `code, token` | Turnier: nur Host, ab 3 Spielern; auch für „neues Turnier“ → `{ok, version}` |
+| `react` | `code, token, emoji` | Emoji aus `👍 😂 😱 🔥 😭 🤝 👏 😈`, max. 1 pro Sekunde pro Spieler (auch Zuschauer) → `{ok, version}` |
+| `claim` | `code, token` | Sieg im eigenen Match beanspruchen, wenn Gegner > 45 s nicht gesehen → `{ok, version}` |
+| `leave` | `code, token` | Raum verlassen (laufendes Match verloren; Host-Rolle wandert weiter) → `{ok, version}` |
+
+Statuscodes: `400` ungültige Eingabe, `403` Token unbekannt / nicht Host, `404` Raum fehlt,
+`405` nicht POST, `409` passt gerade nicht zum Spielstand, `413` Body zu groß, `429` zu schnell,
+`500` interner Fehler, `503` DB ausgelastet / zu viele Räume.
 
 ### Sicht des Spielers (`state`)
 

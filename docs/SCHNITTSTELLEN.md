@@ -115,9 +115,24 @@ createPoller({ code, token, onState, onError, onOnline }) → { start(), stop(),
   },
   "history": [ { "m": ["rock","scissors"], "n": ["<nonce>","<nonce>"], "h": ["<hex>","<hex>"], "w": 0, "f": false } ],
   "winner": null | 0 | 1,
-  "end": null | "score" | "forfeit" | "bye" | "claim" | "leave"
+  "end": null | "score" | "forfeit" | "bye" | "claim" | "leave",
+  "from": null | ["m1", "m2"]                    // Turnier ab Runde 2: Sieger dieser Matches rücken hier ein
 }
 ```
+- **Turnierbaum:** `bracket` enthält ab dem Start den *kompletten* Baum. Spätere Runden sind
+  Platzhalter mit `from`; dort heißt `p[i] === null` „noch offen“ (Freilos erkennt man an `end: "bye"`).
+  Ein Match startet, sobald beide Vorgänger fertig sind (nicht erst, wenn die ganze Runde durch ist).
+  Freilos in Runde 1: `p: [id, null]`, `winner: 0`, `end: "bye"`. Ein Match kann ohne Sieger enden
+  (`winner: null`, nur wenn beide Spieler gegangen sind); dann ggf. `champion: null`.
+- `round`: erste Runde (1-basiert) mit offenem Match; bei `finished` = Anzahl Runden; in der Lobby `null`.
+- `myMatch`: nur gesetzt, wenn das Match **spielbar** ist (beide Plätze besetzt, nicht beendet).
+- Match-IDs laufen pro Raum weiter (`m1`, `m2`, … auch über Revanchen und neue Turniere hinweg).
+  Im Duell bleiben nur die letzten 5 Matches in `matches`.
+- `status` im Duell: `lobby` (1 Spieler) → `running` (auch zwischen Matches) → `finished` (jemand ist gegangen).
+- Unentschieden: `w: -1`. Haben **beide** nicht rechtzeitig aufgedeckt: `w: -1, f: true`, beide Züge `null`,
+  Runde wird ohne Punkt wiederholt. Endet ein Match durch eine Forfeit-Runde: `end: "forfeit"`.
+- `players` enthält auch Gegangene (`left: true`, nie `online`), außer in der Turnier-Lobby (dort entfernt).
+- Antwort von `commit`, `reveal`, `rematch`, `start`, `react`, `claim`, `leave`: `{ "ok": true, "version": 13 }`.
 - `unchanged`-Antwort: `{ "version", "unchanged": true, "now", "online": { "p_ab12": true } }`.
 - Forfeit-Runde (nicht rechtzeitig aufgedeckt): fehlender Zug/Nonce ist `null`, `"f": true`.
 - `create` → `{ code, token, me }`, `join` → `{ token, me, spectator }`. Danach immer `state` laden.
