@@ -4,7 +4,7 @@
   "description": "Nur Dev-Werkzeuge (Tests). Nichts davon landet in public/.",
   "type": "module",
   "scripts": {
-    "test": "node --test tests/js/ && npm run test:php",
+    "test": "node --test 'tests/js/*.test.js' && npm run test:php",
     "setup": "git config core.hooksPath .githooks",
     "secrets": "docker compose --profile tools run --rm -T gitleaks git --redact --no-banner --config .gitleaks.toml . && docker compose --profile tools run --rm -T gitleaks dir --redact --no-banner --config .gitleaks.toml public tests docs",
     "up": "docker compose up -d --build web",

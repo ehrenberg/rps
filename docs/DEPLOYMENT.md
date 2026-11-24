@@ -1,7 +1,55 @@
 # Deployment auf Netcup Webhosting
 
-Kurzfassung: `npm run dist` → Inhalt von `dist/public/` per FTP hochladen →
+Kurzfassung: **automatisch** per GitHub Actions nach jedem grünen Push auf `main`
+(siehe [Automatisches Deployment](#automatisches-deployment-github-actions--ssh)).
+Von Hand weiterhin möglich: `npm run dist` → Inhalt von `dist/public/` per FTP hochladen →
 `npm run check:deploy -- https://rps.bastianswelt.de` → Handprüfung.
+
+## Automatisches Deployment (GitHub Actions + SSH)
+
+Gleiches Verfahren und gleiche Secret-Namen wie bei Wunschstern.
+
+| Datei | Läuft wo | Zweck |
+|---|---|---|
+| `.github/workflows/ci.yml` | GitHub Actions | gitleaks, PHP-Lint + PHP-Tests auf 8.1, JS-Tests, Paket bauen (`dist`) |
+| `.github/workflows/deploy.yml` | GitHub Actions | nach grüner CI auf `main` (oder „Run workflow“): `scripts/dist.sh`, per `tar` über SSH hochladen, Server-Skript, `check:deploy` gegen die Live-Adresse |
+| `deploy/remote-release.sh` | Server (per SSH-stdin) | `data` → `shared/data` verlinken, `current` atomar umstellen, alte Releases (> 5) löschen |
+
+### Verzeichnisstruktur auf dem Server
+
+```
+/rps/                               (Sicht der SSH-Sitzung; PHP-FPM: /var/www/vhosts/<webspace>/rps)
+  releases/20261201-120000/         Inhalt von dist/public/, ein Ordner pro Deployment
+    data -> ../../shared/data
+  shared/data/                      rps.sqlite + Sperr-.htaccess, bleibt über alle Releases erhalten
+  current -> releases/20261201-120000   = Document Root der Subdomain
+```
+
+### Einmalig einrichten
+
+1. **Plesk:** Subdomain `rps.bastianswelt.de`, Document Root **`rps/current`**, PHP ≥ 8.1, Let's Encrypt +
+   HTTP→HTTPS-Weiterleitung. Den leeren Ordner, den Plesk für `current` anlegt, entfernt das Deploy-Skript selbst.
+2. **GitHub-Environment `WebHosting`** im Repo anlegen (*Settings → Environments*) und dort dieselben Werte wie bei
+   Wunschstern eintragen. Secrets lassen sich auf GitHub nicht auslesen, also neu setzen, z. B. mit `gh`:
+
+   | Name | Art | Wert |
+   |---|---|---|
+   | `DEPLOY_HOST`, `DEPLOY_USER`, `DEPLOY_PORT` | Secret | wie bei Wunschstern |
+   | `DEPLOY_SSH_KEY` | Secret | derselbe Deploy-Schlüssel (`~/.ssh/wunschstern_deploy`) oder ein eigener |
+   | `DEPLOY_KNOWN_HOSTS` | Secret | Ausgabe von `ssh-keyscan -p <PORT> <HOST>` |
+   | `DEPLOY_PATH` | Secret | **`/rps`** (Sicht der SSH-Sitzung, kein `~`, nicht `/var/www/vhosts/…`) |
+   | `RPS_DATA_DIR` | Variable, empfohlen | `/var/www/vhosts/<webspace>/rps/shared/data` (Sicht von PHP-FPM) → `SetEnv` in der Paket-`.htaccess` |
+   | `DEPLOY_URL` | Variable, optional | Standard `https://rps.bastianswelt.de` |
+
+   Unter *Deployment branches* auf `main` beschränken (das Repo ist öffentlich).
+3. Erstes Deployment: *Actions → Deploy → Run workflow*. Ab dann rollt jeder grüne Push auf `main` aus.
+
+Solange ein Pflicht-Secret fehlt, wird der Deploy-Job übersprungen (grau mit Hinweis), nicht rot.
+Ohne `RPS_DATA_DIR` landet die Datenbank trotzdem in `shared/data` (über den `data`-Symlink, per `.htaccess`
+gesperrt). Mit `RPS_DATA_DIR` greift PHP direkt auf denselben Ordner zu, ohne Umweg über den Webroot.
+
+**Rückrollen:** per SSH `cd /rps && ls -1 releases && ln -sfn releases/<VORHERIGES> current.tmp && mv -Tf current.tmp current`,
+danach den fehlerhaften Commit auf `main` reverten.
 
 ## Einmalig: Hosting vorbereiten
 

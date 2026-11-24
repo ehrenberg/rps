@@ -1,0 +1,79 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  gitleaks:
+    name: Gitleaks (Secrets-Scan)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Gitleaks über Historie und Arbeitskopie
+        run: |
+          docker run --rm -v "$PWD:/repo" -w /repo zricethezav/gitleaks:v8.30.1 \
+            git --redact --no-banner --config /repo/.gitleaks.toml --exit-code 1
+          docker run --rm -v "$PWD:/repo" -w /repo zricethezav/gitleaks:v8.30.1 \
+            dir --redact --no-banner --config /repo/.gitleaks.toml --exit-code 1 public tests docs
+
+  test:
+    name: PHP-Lint (8.1), PHP- und JS-Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Mindestversion laut AGENTS.md; netcup darf neuer sein.
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.1'
+          extensions: pdo_sqlite, json, intl
+          coverage: none
+
+      - name: PHP-Lint
+        run: |
+          find public tests -name '*.php' -print0 | xargs -0 -n1 php -l >/dev/null
+          echo "PHP-Lint ok"
+
+      - name: PHP-Tests
+        run: php tests/run.php
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: JS-Tests
+        run: node --test 'tests/js/*.test.js'
+
+  package:
+    name: Upload-Paket bauen (dist)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: gitleaks für scripts/dist.sh bereitstellen
+        run: |
+          mkdir -p "$RUNNER_TEMP/bin"
+          cat > "$RUNNER_TEMP/bin/gitleaks" <<'SH'
+          #!/usr/bin/env bash
+          exec docker run --rm -v "$PWD:$PWD" -w "$PWD" zricethezav/gitleaks:v8.30.1 "$@"
+          SH
+          chmod +x "$RUNNER_TEMP/bin/gitleaks"
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+      - name: npm run dist (ohne Tests, die laufen im Job „test“)
+        run: bash scripts/dist.sh --skip-tests
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rps-public
+          path: dist/public
+          include-hidden-files: true
+          retention-days: 7

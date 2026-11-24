@@ -80,3 +80,12 @@ Lobbys entschärft, und das Token schützt die Plätze – ein erratener Code er
   sonst sichtbaren Text plus `.visually-hidden`.
 - axe-core wird **nicht** ins Repo aufgenommen; `tests/e2e/a11y.test.mjs` injiziert es per `AXE_PATH`.
 **Begründung:** WCAG 2.1 AA ohne neue Abhängigkeiten in `public/`; Ansagen informativ, aber nicht geschwätzig.
+
+### 2026-11-24 – Automatisches Deployment per GitHub Actions und SSH
+**Entscheidung:** Statt FTP-Upload von Hand rollt `.github/workflows/deploy.yml` jeden grünen Push auf `main`
+aus: Paket mit `scripts/dist.sh`, `tar` über SSH nach `releases/<Zeitstempel>`, `current` als Document Root
+atomar umstellen, Datenbank in `shared/data`. Gleiche Secret-Namen und gleiches Environment (`WebHosting`)
+wie bei Wunschstern. Der FTP-Weg bleibt als Rückfall dokumentiert.
+**Begründung:** Ein Verfahren für beide Projekte auf demselben netcup-Webspace; atomare Releases mit Rückrollen,
+alte Dateien bleiben nicht liegen, die Datenbank übersteht jedes Deployment. Auf dem Server braucht es weiterhin
+nur PHP + SQLite (bash/tar nutzt nur die SSH-Sitzung beim Ausrollen).

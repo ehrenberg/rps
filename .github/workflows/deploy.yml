@@ -1,0 +1,146 @@
+name: Deploy
+
+# Baut das Upload-Paket (scripts/dist.sh) und spielt es per SSH auf netcup Webhosting ein
+# (siehe docs/DEPLOYMENT.md, Abschnitt „Automatisches Deployment“).
+# Läuft automatisch nach grüner CI auf main oder manuell über „Run workflow“.
+# Solange die DEPLOY_*-Secrets fehlen, wird der Deploy-Job übersprungen (grau statt rot).
+
+on:
+  workflow_dispatch:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+
+# Nie zwei Deployments gleichzeitig; ein laufendes wird nicht abgebrochen (halbe Releases vermeiden).
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Voraussetzungen prüfen
+    runs-on: ubuntu-latest
+    # Nur nach grüner CI für einen Push auf main in diesem Repo (keine Pull Requests, keine Forks) oder manuell.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_repository.full_name == github.repository)
+    # Die DEPLOY_*-Secrets liegen im GitHub-Environment „WebHosting“ (gleiche Namen wie bei Wunschstern).
+    environment: WebHosting
+    outputs:
+      enabled: ${{ steps.secrets.outputs.enabled }}
+    steps:
+      - name: Sind alle DEPLOY_*-Secrets gesetzt?
+        id: secrets
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          missing=""
+          for name in DEPLOY_HOST DEPLOY_USER DEPLOY_PORT DEPLOY_PATH DEPLOY_SSH_KEY DEPLOY_KNOWN_HOSTS; do
+            if [ -z "${!name}" ]; then missing="$missing $name"; fi
+          done
+          if [ -n "$missing" ]; then
+            echo "::notice title=Deployment übersprungen::Fehlende Secrets:$missing (siehe docs/DEPLOYMENT.md)"
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  deploy:
+    name: Paket bauen und ausrollen
+    needs: check
+    if: needs.check.outputs.enabled == 'true'
+    runs-on: ubuntu-latest
+    environment:
+      name: WebHosting
+      url: ${{ vars.DEPLOY_URL || 'https://rps.bastianswelt.de' }}
+    env:
+      DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+      DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+      DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
+      DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+      # Absoluter Pfad des Datenordners aus Sicht von PHP-FPM, z. B.
+      # /var/www/vhosts/<webspace>/rps/shared/data. Optional; ohne liegt die DB in shared/data über den data/-Symlink.
+      RPS_DATA_DIR: ${{ vars.RPS_DATA_DIR || secrets.RPS_DATA_DIR }}
+      DEPLOY_URL: ${{ vars.DEPLOY_URL || 'https://rps.bastianswelt.de' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Bei workflow_run genau den Commit ausrollen, den die CI geprüft hat.
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - name: gitleaks für scripts/dist.sh bereitstellen
+        run: |
+          mkdir -p "$RUNNER_TEMP/bin"
+          cat > "$RUNNER_TEMP/bin/gitleaks" <<'SH'
+          #!/usr/bin/env bash
+          exec docker run --rm -v "$PWD:$PWD" -w "$PWD" zricethezav/gitleaks:v8.30.1 "$@"
+          SH
+          chmod +x "$RUNNER_TEMP/bin/gitleaks"
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+
+      - name: Upload-Paket bauen (Tests liefen bereits in der CI)
+        run: bash scripts/dist.sh --skip-tests
+
+      - name: SSH einrichten
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+          cat > ~/.ssh/config <<CONFIG
+          Host deploy-target
+            HostName $DEPLOY_HOST
+            User $DEPLOY_USER
+            Port $DEPLOY_PORT
+            IdentityFile ~/.ssh/deploy_key
+            IdentitiesOnly yes
+            StrictHostKeyChecking yes
+          CONFIG
+          chmod 600 ~/.ssh/config
+
+      - name: Release-Namen festlegen
+        id: release
+        run: echo "name=$(date -u +%Y%m%d-%H%M%S)" >> "$GITHUB_OUTPUT"
+
+      - name: Release hochladen (tar über SSH, netcup hat kein rsync)
+        env:
+          RELEASE: ${{ steps.release.outputs.name }}
+        run: |
+          # shellcheck disable=SC2029
+          ssh deploy-target "mkdir -p '$DEPLOY_PATH/releases/$RELEASE'"
+          # shellcheck disable=SC2029
+          tar -czf - -C dist/public . | ssh deploy-target "tar -xzf - -C '$DEPLOY_PATH/releases/$RELEASE'"
+
+      - name: Release aktivieren (Datenordner, Symlink, Aufräumen)
+        env:
+          RELEASE: ${{ steps.release.outputs.name }}
+        # Das Skript liegt nicht im Paket (public/), deshalb per stdin an die Server-Shell.
+        run: |
+          # shellcheck disable=SC2029
+          ssh deploy-target "bash -s -- '$DEPLOY_PATH' '$RELEASE'" < deploy/remote-release.sh
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Prüfung der Live-Installation (check:deploy)
+        run: node scripts/check-deploy.mjs "$DEPLOY_URL"
+
+      - name: SSH-Schlüssel entfernen
+        if: always()
+        run: rm -f ~/.ssh/deploy_key
