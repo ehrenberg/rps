@@ -28,6 +28,11 @@ Port belegt? `RPS_PORT=8090 npm run up`.
 | PHP-Tests | `php tests/run.php` | vor jedem Commit |
 | Alle Tests | `npm test` | vor jedem Commit |
 | E2E (Playwright) | `npm run test:e2e` | vor Abschluss einer Phase |
+| Upload-Paket bauen | `npm run dist` | vor jedem Upload (prüft sauberes Repo, Tests, gitleaks) |
+| Installation prüfen | `npm run check:deploy -- <url>` | nach jedem Upload, auch lokal (`http://localhost:8088`) |
+| Icons neu rendern | `npm run icons` | nach Änderungen an `icon.svg` / `icon-maskable.svg` |
+
+Ablauf für den Livegang: [DEPLOYMENT.md](DEPLOYMENT.md).
 
 Der Pre-Commit-Hook (`.githooks/pre-commit`) bricht den Commit ab, wenn gitleaks etwas findet.
 Konfiguration: `.gitleaks.toml` (Standardregeln + FTP-Zugangsdaten). Falschmeldungen gezielt
