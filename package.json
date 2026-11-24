@@ -1,0 +1,10 @@
+{
+  "name": "rps-dev",
+  "private": true,
+  "description": "Nur Dev-Werkzeuge (Tests). Nichts davon landet in public/.",
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/js/ && php tests/run.php",
+    "serve": "php -S localhost:8000 -t public"
+  }
+}
