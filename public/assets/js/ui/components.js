@@ -93,7 +93,8 @@ export function nameInput({ settings, id = 'player-name', label = 'Dein Name', o
       const limited = truncateName(input.value);
       if (limited !== input.value) input.value = limited;
     }
-    onChange?.(settings.setName(input.value));
+    const name = settings.setName(input.value); // nicht in onChange?.() – das wertet ohne onChange nichts aus
+    onChange?.(name);
   });
   input.addEventListener('change', () => { input.value = settings.setName(input.value); });
   const el = h('div', { class: 'field field--name' },
