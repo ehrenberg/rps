@@ -1,7 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createCpuOpponent } from '../../public/assets/js/cpu-opponent.js';
-import { createArenaController, moveForKey, PHASE } from '../../public/assets/js/arena.js';
+import { createArenaController, PHASE } from '../../public/assets/js/arena.js';
+import { moveForKey, MOVE_LETTERS } from '../../public/assets/js/move-keys.js';
 import { verifyCommit } from '../../public/assets/js/crypto.js';
 
 /** KI, die eine feste Zugfolge spielt und Beobachtungen mitschreibt. */
@@ -24,7 +25,8 @@ function fakeView() {
   const rec = (name) => (...args) => { calls.push([name, ...args]); };
   const view = { calls };
   for (const m of ['setup', 'setRoundOpen', 'setChosen', 'setOpponentStatus', 'playCountdown', 'reveal',
-    'setScore', 'addHistory', 'setFairness', 'setInsight', 'showReaction', 'showMatchOver', 'hideMatchOver', 'showError']) {
+    'setScore', 'addHistory', 'setFairness', 'setInsight', 'showReaction', 'showMatchOver', 'hideMatchOver', 'showError',
+    'setMovesEnabled', 'setOpponentCommit', 'setRematchStatus']) {
     view[m] = rec(m);
   }
   view.names = () => calls.map((c) => c[0]);
@@ -106,7 +108,7 @@ test('Komplettes Best of 3: Reihenfolge, Statistik, Fairness, Matchende', async 
 
   await play(ctl, 'rock');
   assert.equal(ctl.phase, PHASE.OVER);
-  assert.deepEqual(view.last('showMatchOver')[1], { won: true, score: [2, 0], reason: 'score', oppName: undefined, series: null });
+  assert.deepEqual(view.last('showMatchOver')[1], { won: true, score: [2, 0], reason: 'score', oppName: undefined, series: null, rematch: null });
   assert.deepEqual(stats.rounds.map((r) => r.result), ['w', 'd', 'w']);
   assert.deepEqual(stats.matches, [{ mode: 'cpu-3', result: 'w' }]);
 
@@ -205,4 +207,174 @@ test('Sofort-Ereignisse warten nicht auf Animationen', async () => {
   release();
   await ctl.idle();
   assert.ok(view.names().includes('setRoundOpen'));
+});
+
+// ─── Online-ähnlicher Adapter für die Controller-Tests ───
+function scriptedAdapter(overrides = {}) {
+  const a = {
+    info: { kind: 'online', statsMode: 'duel', variant: 'classic', bestOf: 3,
+      features: { status: true, reactions: true, commitBadge: true, insight: false, claim: true } },
+    emit: null,
+    marked: [],
+    start(h) { a.emit = h; }, submitMove: async () => {}, rematch() {}, sendReaction() {}, dispose() {},
+    markRecorded(id) { a.marked.push(id); },
+    ...overrides,
+  };
+  return a;
+}
+
+/** Ansicht, die den Freigabe-Zustand der Zug-Buttons wie die echte Ansicht abbildet. */
+function statefulView() {
+  const view = fakeView();
+  view.movesEnabled = false;
+  const wrap = (name, fn) => { const orig = view[name]; view[name] = (...args) => { fn(...args); return orig(...args); }; };
+  wrap('setRoundOpen', () => { view.movesEnabled = true; });
+  wrap('setChosen', () => { view.movesEnabled = false; });
+  wrap('setMovesEnabled', (on) => { view.movesEnabled = on; });
+  wrap('showMatchOver', () => { view.movesEnabled = false; });
+  return view;
+}
+
+const tick = () => new Promise((r) => setTimeout(r, 0));
+
+test('MOVE_LETTERS liegt im eigenen Modul (Ansicht importiert nicht vom Controller)', () => {
+  assert.equal(MOVE_LETTERS.rock, 's');
+});
+
+test('Commit-Fehler: Zug-Buttons wieder frei, nicht nur die Phase', async () => {
+  const view = statefulView();
+  const adapter = scriptedAdapter({ submitMove: async () => { throw new Error('Keine Verbindung zum Server.'); } });
+  const ctl = createArenaController({ adapter, view });
+  ctl.start();
+  adapter.emit('matchStart', { variant: 'classic', bestOf: 3, target: 2, oppName: 'Ben' });
+  adapter.emit('roundOpen', { round: 1, commit: null });
+  await ctl.idle();
+  assert.equal(view.movesEnabled, true);
+  ctl.choose('rock');
+  assert.equal(view.movesEnabled, false);
+  await tick();
+  assert.equal(ctl.phase, PHASE.CHOOSING);
+  assert.equal(view.movesEnabled, true, 'Spieler kann erneut wählen');
+  assert.equal(ctl.choose('paper'), true);
+});
+
+test('Commit-Fehler nach moveRestored (Server hat den Zug doch) → Buttons bleiben gesperrt', async () => {
+  const view = statefulView();
+  let reject;
+  const adapter = scriptedAdapter({ submitMove: () => new Promise((_, r) => { reject = r; }) });
+  const ctl = createArenaController({ adapter, view });
+  ctl.start();
+  adapter.emit('matchStart', { variant: 'classic', bestOf: 3, target: 2, oppName: 'Ben' });
+  adapter.emit('roundOpen', { round: 1, commit: null });
+  await ctl.idle();
+  ctl.choose('rock');
+  adapter.emit('moveRestored', { move: 'rock' });
+  adapter.emit('roundLocked', {});
+  await ctl.idle();
+  reject(new Error('Zeitüberschreitung'));
+  await tick();
+  assert.equal(view.movesEnabled, false);
+  assert.notEqual(ctl.phase, PHASE.CHOOSING);
+});
+
+test('rematchStatus vor dem (animierten) Matchende geht nicht verloren', async () => {
+  const view = statefulView();
+  let release;
+  view.playCountdown = () => new Promise((r) => { release = r; });
+  const adapter = scriptedAdapter();
+  const ctl = createArenaController({ adapter, view });
+  ctl.start();
+  adapter.emit('matchStart', { variant: 'classic', bestOf: 3, target: 2, oppName: 'Ben' });
+  adapter.emit('roundLocked', {});
+  adapter.emit('matchOver', { winner: 'me', score: [2, 0], reason: 'score', recordId: 'm:m1' });
+  adapter.emit('rematchStatus', { me: false, opp: false, oppLeft: true }); // sofort, Overlay gibt es noch nicht
+  await tick();
+  release();
+  await ctl.idle();
+  assert.deepEqual(view.last('showMatchOver')[1].rematch, { me: false, opp: false, oppLeft: true });
+  // Neues Match: alter Status gilt nicht mehr
+  adapter.emit('matchStart', { variant: 'classic', bestOf: 3, target: 2, oppName: 'Ben' });
+  adapter.emit('matchOver', { winner: 'opp', score: [0, 2], reason: 'score', recordId: 'm:m2' });
+  await ctl.idle();
+  assert.equal(view.last('showMatchOver')[1].rematch, null);
+});
+
+test('Fairness: Hash weicht vom vorher gezeigten ab bzw. eigener Hash falsch → nicht fair', async () => {
+  const view = fakeView();
+  const adapter = scriptedAdapter();
+  const ctl = createArenaController({ adapter, view, verify: async () => true });
+  ctl.start();
+  adapter.emit('matchStart', { variant: 'classic', bestOf: 3, target: 2, oppName: 'Ben' });
+  adapter.emit('opponentCommit', { hash: 'aaaa1111' });
+  const round = { number: 1, myMove: 'rock', oppMove: 'paper', outcome: -1, result: 'l', sentence: 'x', score: [0, 1] };
+  adapter.emit('roundResolved', { ...round, proof: { hash: 'bbbb', move: 'paper', nonce: 'n', shownHash: 'aaaa1111', ownHashOk: null } });
+  await ctl.idle();
+  assert.deepEqual(view.last('setOpponentCommit').slice(1), ['aaaa1111']);
+  assert.equal(view.last('setFairness')[1].ok, false);
+  assert.equal(view.last('setFairness')[1].reason, 'shown');
+  adapter.emit('roundResolved', { ...round, number: 2, proof: { hash: 'bbbb', move: 'paper', nonce: 'n', shownHash: 'bbbb', ownHashOk: false } });
+  await ctl.idle();
+  assert.equal(view.last('setFairness')[1].ok, false);
+  assert.equal(view.last('setFairness')[1].reason, 'own');
+  adapter.emit('roundResolved', { ...round, number: 3, proof: { hash: 'bbbb', move: 'paper', nonce: 'n', shownHash: 'bbbb', ownHashOk: true } });
+  await ctl.idle();
+  assert.equal(view.last('setFairness')[1].ok, true);
+  assert.equal(view.last('setFairness')[1].reason, null);
+});
+
+test('Matchende ohne Sieger (beide weg): neutral, keine Statistik', async () => {
+  const view = fakeView();
+  const stats = fakeStats();
+  const adapter = scriptedAdapter();
+  const ctl = createArenaController({ adapter, view, stats });
+  ctl.start();
+  adapter.emit('matchOver', { winner: null, score: [1, 1], reason: 'leave', recordId: 'm:m1' });
+  await ctl.idle();
+  assert.deepEqual(stats.matches, []);
+  assert.equal(view.last('showMatchOver')[1].won, null);
+});
+
+test('Statistik je Match genau einmal: markRecorded nach dem Zählen, replay zählt nicht', async () => {
+  const view = fakeView();
+  const stats = fakeStats();
+  const adapter = scriptedAdapter();
+  const ctl = createArenaController({ adapter, view, stats });
+  ctl.start();
+  adapter.emit('matchOver', { winner: 'me', score: [2, 0], reason: 'score', recordId: 'm:m1' });
+  await ctl.idle();
+  assert.deepEqual(stats.matches, [{ mode: 'duel', result: 'w' }]);
+  assert.deepEqual(adapter.marked, ['m:m1']);
+  adapter.emit('matchOver', { winner: 'me', score: [2, 0], reason: 'score', recordId: 'm:m1', replay: true });
+  await ctl.idle();
+  assert.equal(stats.matches.length, 1);
+  assert.deepEqual(adapter.marked, ['m:m1']);
+});
+
+test('Sieg beanspruchen: keine Doppelanfrage, Fehler nach dispose nicht mehr angezeigt', async () => {
+  const view = fakeView();
+  let calls = 0;
+  let reject;
+  const adapter = scriptedAdapter({ claim: () => { calls += 1; return new Promise((_, r) => { reject = r; }); } });
+  const ctl = createArenaController({ adapter, view });
+  ctl.start();
+  ctl.claim();
+  ctl.claim();
+  assert.equal(calls, 1);
+  ctl.dispose();
+  reject(new Error('weg'));
+  await tick();
+  assert.equal(view.names().includes('showError'), false);
+});
+
+test('Sieg beanspruchen: nach Fehler erneut möglich', async () => {
+  const view = fakeView();
+  let calls = 0;
+  const adapter = scriptedAdapter({ claim: async () => { calls += 1; throw new Error('Noch nicht möglich.'); } });
+  const ctl = createArenaController({ adapter, view });
+  ctl.start();
+  ctl.claim();
+  await tick();
+  assert.equal(view.last('showError')[1], 'Noch nicht möglich.');
+  ctl.claim();
+  assert.equal(calls, 2);
 });

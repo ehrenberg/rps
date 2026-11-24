@@ -7,18 +7,17 @@ import { inviteView } from './invite.js';
 import { lobbyView } from './lobby.js';
 import { bracketView } from './bracket-view.js';
 import { mountArena } from './arena-screen.js';
-import { api, createPoller, createRoomSession, RECONNECT_TEXT } from '../net.js';
+import { api, createPoller, createRoomSession, RECONNECT_TEXT, HTTP, StateHandlerError } from '../net.js';
 import { createOnlineOpponent, newReactions, maxReactionId } from '../online-opponent.js';
-import { tournamentRole, roundTitle } from '../bracket.js';
+import { tournamentRole, roundTitle, tournamentKey } from '../bracket.js';
+import { decideRoute, leaveClearsSession, myRunningMatch } from '../room-flow.js';
 import { VARIANT_NAMES } from '../rules.js';
-import { recordTournament } from '../stats.js';
+import { recordTournament, recordMatch } from '../stats.js';
 import { hrefFor } from '../router.js';
 import * as fx from '../fx.js';
 import * as audio from '../audio.js';
 
 export const title = 'Online-Raum';
-const HTTP_FORBIDDEN = 403;
-const HTTP_TOO_MANY = 429;
 
 export function render({ params, settings, announce, navigate }) {
   const { code } = params;
@@ -32,6 +31,8 @@ export function render({ params, settings, announce, navigate }) {
   let lastReactionId = null;
   let dismissedMatch = null; // Turnier: Arena dieses Matches wurde Richtung Baum verlassen
   let disposed = false;
+  let stateErrorToast = null; // Anzeige-Fehler (onState warf) – einmal zeigen bis zur Erholung
+  let leaving = false;
 
   function show(next) {
     sub?.dispose?.();
@@ -49,15 +50,42 @@ export function render({ params, settings, announce, navigate }) {
       text: lastState?.status === 'running' ? 'Ein laufendes Match zählt dann als verloren.' : 'Du kannst später über den Link wieder beitreten.',
       confirmLabel: 'Verlassen', danger: true,
     });
-    if (!ok) return;
-    try { await api('leave', { code, token: creds.token }); } catch (err) { if (err.status !== HTTP_FORBIDDEN) showError(err); }
+    if (!ok || leaving || !creds) return;
+    leaving = true;
+    const running = myRunningMatch(lastState, creds.me);
+    let failure = null;
+    try { await api('leave', { code, token: creds.token }); } catch (err) { failure = err; }
+    leaving = false;
+    // Bei Netz-/Serverfehler bleibt der Platz (sonst wäre man ausgesperrt, obwohl man noch drin ist)
+    if (!leaveClearsSession(failure)) { showError(failure); return; }
+    // Wie im Dialog versprochen: ein laufendes Match zählt als verloren (höchstens einmal)
+    if (!failure && running && !session.wasRecorded(code, running.recordId)) {
+      recordMatch({ mode: running.mode, result: 'l' });
+    }
     session.clear(code);
     navigate(hrefFor('home'));
   }
 
+  /** „Menü“/„Zurück“ in der Arena: bei laufendem eigenem Match erst nachfragen. */
+  function confirmMenu(e) {
+    if (!myRunningMatch(lastState, creds?.me)) return;
+    e?.preventDefault();
+    confirmDialog({
+      title: 'Match verlassen?',
+      text: 'Du bist noch im Match – wirklich gehen? Du kannst über den Link zurückkehren.',
+      confirmLabel: 'Zum Menü',
+    }).then((ok) => { if (ok) navigate(hrefFor('home')); });
+  }
+
   const act = (action, params = {}) => api(action, { code, token: creds.token, ...params })
     .then(() => poller?.poke())
-    .catch((err) => { if (err.status !== HTTP_TOO_MANY) showError(err); });
+    .catch((err) => { if (err.status !== HTTP.TOO_MANY) showError(err); });
+
+  /** Konfetti beim Turniersieg nur einmal je Turnier (auch über Reloads). */
+  const celebration = {
+    done: (key) => session.wasRecorded(code, `confetti:${key}`),
+    mark: (key) => session.markRecorded(code, `confetti:${key}`),
+  };
 
   // ─── Unteransichten ───
   function showArena(state, matchId) {
@@ -69,13 +97,14 @@ export function render({ params, settings, announce, navigate }) {
     const roundIdx = (state.bracket ?? []).findIndex((r) => r.includes(matchId));
     const modeLabel = kind === 'duel'
       ? `Online · ${VARIANT_NAMES[state.variant]} · Best of ${state.bestOf}`
-      : `Turnier · ${roundTitle(roundIdx, state.bracket.length)} · Best of ${state.bestOf}`;
+      : `${roundTitle(roundIdx, state.bracket.length)} · Best of ${state.bestOf}`; // Turnierrunde nur hier
     const arena = mountArena({
       adapter, settings, announce, modeLabel,
       myName: state.players.find((p) => p.id === creds.me)?.name,
       againLabel: kind === 'duel' ? 'Revanche' : 'Zum Turnierbaum',
       onAgain: kind === 'duel' ? undefined : () => { dismissedMatch = adapter.matchId; route(lastState); },
       onLeave: leaveRoom,
+      onMenu: confirmMenu,
     });
     show({
       kind: 'arena', matchId: adapter.matchId, el: arena.el, focus: arena.focus,
@@ -97,6 +126,7 @@ export function render({ params, settings, announce, navigate }) {
       onRestart: () => act('start'),
       onPlay: () => { dismissedMatch = null; route(lastState); },
       onLeave: leaveRoom,
+      celebration,
       announce,
     });
     show({ kind: 'bracket', ...v });
@@ -116,7 +146,7 @@ export function render({ params, settings, announce, navigate }) {
 
   function recordTournamentEnd(state) {
     if (state.type !== 'tournament' || state.status !== 'finished') return;
-    const key = `t:${(state.bracket ?? []).flat().join(',')}`;
+    const key = tournamentKey(state);
     const role = tournamentRole(state, creds.me);
     if (role === 'spectator' || session.wasRecorded(code, key)) return;
     session.markRecorded(code, key);
@@ -125,41 +155,17 @@ export function render({ params, settings, announce, navigate }) {
 
   function route(state) {
     if (!state || disposed) return;
-    const me = creds.me;
-    if (state.type === 'duel') {
-      const cur = state.current ? state.matches?.[state.current] : null;
-      if (state.status === 'lobby' || !cur || !cur.p.includes(me)) {
-        if (sub?.kind !== 'lobby') showLobby(state); else sub.update(state);
-        poller.setMode('idle');
-        return;
-      }
-      if (sub?.kind !== 'arena') { audio.play('join'); showArena(state, state.current); } else sub.update(state);
-      poller.setMode(cur.winner !== null || cur.end ? 'end' : 'match');
-      return;
+    if (state.type === 'tournament' && state.status !== 'lobby') recordTournamentEnd(state);
+    const next = decideRoute(state, { me: creds.me, shown: sub, dismissedMatch });
+    if (!next.fresh) sub.update(state);
+    else if (next.view === 'lobby') showLobby(state);
+    else if (next.view === 'bracket') showBracket(state);
+    else {
+      if (next.toast) showToast(next.toast, { kind: 'success' });
+      if (state.type === 'duel') audio.play('join');
+      showArena(state, next.matchId);
     }
-    // Turnier
-    if (state.status === 'lobby') {
-      if (sub?.kind !== 'lobby') showLobby(state); else sub.update(state);
-      poller.setMode('idle');
-      return;
-    }
-    recordTournamentEnd(state);
-    // Eigenes, gerade gezeigtes Match bleibt (mit Matchende-Overlay), bis man zum Baum wechselt.
-    const shown = sub?.kind === 'arena' ? sub.matchId : null;
-    let target = null;
-    if (shown && shown !== dismissedMatch && state.matches?.[shown]) target = shown;
-    else if (state.myMatch && state.myMatch !== dismissedMatch) target = state.myMatch;
-    if (target) {
-      if (shown !== target) {
-        if (shown === null) showToast('Dein Match beginnt!', { kind: 'success' });
-        showArena(state, target);
-      } else sub.update(state);
-      const m = state.matches[target];
-      poller.setMode(m.winner !== null || m.end ? 'end' : 'match');
-      return;
-    }
-    if (sub?.kind !== 'bracket') showBracket(state); else sub.update(state);
-    poller.setMode(state.status === 'finished' ? 'end' : 'idle');
+    poller.setMode(next.mode);
   }
 
   // ─── Verbindung ───
@@ -171,14 +177,20 @@ export function render({ params, settings, announce, navigate }) {
         lastState = state;
         route(state);
         floatReactions(state);
+        stateErrorToast?.close();
+        stateErrorToast = null;
       },
       onOnline: (map) => sub?.online?.(map),
       onError: (err, { fatal }) => {
+        if (err instanceof StateHandlerError) {
+          stateErrorToast ??= showToast(err.message, { kind: 'error', duration: 0 });
+          return;
+        }
         if (!fatal) return;
         // 403: Platz ungültig → neu beitreten; 404: Raum weg → Einladungsseite zeigt „nicht gefunden“
         session.clear(code);
         creds = null;
-        if (err.status === HTTP_FORBIDDEN) showToast('Dein Platz in diesem Raum gilt nicht mehr – bitte neu beitreten.', { kind: 'error' });
+        if (err.status === HTTP.FORBIDDEN) showToast('Dein Platz in diesem Raum gilt nicht mehr – bitte neu beitreten.', { kind: 'error' });
         showInvite();
       },
       onConnection: (ok) => {
@@ -216,6 +228,7 @@ export function render({ params, settings, announce, navigate }) {
       poller?.stop();
       sub?.dispose?.();
       reconnectToast?.close();
+      stateErrorToast?.close();
     },
   };
 }

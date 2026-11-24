@@ -14,6 +14,7 @@ const PERCENT = 100;
 const MODE_ROWS = Object.freeze([
   ...AI_LEVELS.map((l) => ({ key: `cpu-${l.level}`, label: `Computer · ${l.name}` })),
   { key: 'duel', label: 'Online-Duell' },
+  { key: 'tournament', label: 'Turnier-Matches' },
 ]);
 
 const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);

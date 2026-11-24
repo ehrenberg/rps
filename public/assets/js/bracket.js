@@ -69,6 +69,25 @@ export function buildBracket(state, me) {
   };
 }
 
+/** Kennung eines Turniers (neues Turnier im selben Raum = neue Match-IDs), z. B. für „schon gezählt“. */
+export function tournamentKey(state) {
+  return `t:${(state.bracket ?? []).flat().join(',')}`;
+}
+
+/** ID meines laufenden Matches im aufbereiteten Baum (buildBracket) oder null. */
+export function myLiveMatchId(built) {
+  for (const round of built.rounds) {
+    const m = round.matches.find((x) => x.mine && x.status === MATCH_STATUS.LIVE);
+    if (m) return m.id;
+  }
+  return null;
+}
+
+/** Zum eigenen Match scrollen nur beim ersten Rendern (prev undefined) oder wenn es wechselt. */
+export function shouldScrollToMatch(prev, next) {
+  return Boolean(next) && next !== prev;
+}
+
 /** Meine Rolle im Turnier: 'spectator' | 'playing' | 'waiting' | 'out' | 'champion'. */
 export function tournamentRole(state, me) {
   if (state.champion && state.champion === me) return 'champion';

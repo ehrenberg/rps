@@ -1,6 +1,7 @@
 // Arena-Screen: verbindet einen Gegner-Adapter (Computer oder Online) mit Controller und Ansicht.
 import { createArenaView } from './arena-view.js';
-import { createArenaController, moveForKey } from '../arena.js';
+import { createArenaController } from '../arena.js';
+import { moveForKey } from '../move-keys.js';
 import { createCpuOpponent } from '../cpu-opponent.js';
 import { AI_LEVELS } from '../ai.js';
 import { VARIANT_NAMES } from '../rules.js';
@@ -16,10 +17,11 @@ function isTypingTarget(target) {
 /**
  * Arena für beliebigen Adapter aufbauen.
  * @param {{ adapter, settings, announce, modeLabel:string, myName?:string, againLabel?:string,
- *           onAgain?:(controller)=>void, onLeave?:()=>void }} o
+ *           onAgain?:(controller)=>void, onLeave?:()=>void, onMenu?:(e:Event)=>void }} o
+ *   onMenu: Klick auf „Menü“ (Arena oben und Matchende); preventDefault verhindert das Wegnavigieren.
  *   onAgain: Standard = controller.rematch() (Nochmal/Revanche); Turnier: zurück zum Baum.
  */
-export function mountArena({ adapter, settings, announce, modeLabel, myName, againLabel, onAgain, onLeave }) {
+export function mountArena({ adapter, settings, announce, modeLabel, myName, againLabel, onAgain, onLeave, onMenu }) {
   let controller = null;
   const { variant } = adapter.info;
   const view = createArenaView({
@@ -34,6 +36,7 @@ export function mountArena({ adapter, settings, announce, modeLabel, myName, aga
     onReact: (emoji) => controller.react(emoji),
     onClaim: () => controller.claim(),
     onLeave,
+    onMenu,
   });
   controller = createArenaController({ adapter, view, stats });
 

@@ -108,22 +108,41 @@ Computer jetzt (`cpu-opponent.js`), Online später: nur ein neuer Adapter, Contr
 createArenaController({ adapter, view, stats?, verify? = verifyCommit }) → {
   phase,                      // 'waiting' | 'choosing' | 'submitted' | 'playing' | 'over'
   start(), choose(move) → bool, rematch() → bool, react(emoji), dispose(),
+  claim(),                    // Sieg beanspruchen; während der Anfrage ignoriert (keine Doppelanfrage)
   onPhase(fn) → unsubscribe, idle() → Promise   // idle: alle bisherigen Ereignisse abgearbeitet
 }
+PHASE
+// move-keys.js (von Arena-Screen und Ansicht genutzt; die Ansicht importiert nie arena.js)
 moveForKey(key, variant) → move | null           // '1'…'5' bzw. s/p/c/e/k (Stein/Papier/sChere/Echse/spocK)
-MOVE_LETTERS, PHASE
+MOVE_LETTERS
 
 // Gegner-Adapter (OpponentAdapter)
 {
   info: { kind: 'cpu'|'online', statsMode /* 'cpu-1'…'cpu-4'|'duel'|'tournament' */, variant, bestOf,
-          features: { status, reactions, commitBadge, insight } },
+          features: { status, reactions, commitBadge, insight, claim? } },
+          // claim: Adapter bietet claim() an („Sieg beanspruchen“, nur online)
   start(handler),            // handler(type, payload) – Ereignisse siehe unten
   submitMove(move) → Promise,// eigener Zug (online: commitHash + Nonce senden)
   rematch(),                 // Nochmal / Revanche anfragen
   sendReaction(emoji),       // nur wenn features.reactions
   dispose(),                 // Timer/Polling stoppen
+  claim?() → Promise,        // optional: Sieg beanspruchen
+  markRecorded?(recordId),   // optional: Match wurde in der Statistik gezählt (nach Reload nicht erneut)
 }
+
+// Ansicht (ArenaView, ui/arena-view.js) – vom Controller aufgerufen
+setup(…), setRoundOpen({ round, commit }), setChosen(move), setMovesEnabled(enabled),
+setOpponentStatus(state), playCountdown(), reveal(round), setScore(score, { scorer }), addHistory(round),
+setFairness({ ok, proof, reason: null|'hash'|'shown'|'own' }), setInsight(text), showReaction(r),
+showMatchOver({ won: true|false|null, score, reason, oppName?, series?, rematch? }), hideMatchOver(), showError(msg)
+// optional (online): setDeadline(s, who), setClaimAvailable(bool), setRematchStatus(info), setSeries(s),
+// setOpponentCommit(hash)
 ```
+- `setMovesEnabled(true)` nach fehlgeschlagener Zugabgabe (Buttons wieder frei, Markierung weg) – nicht,
+  wenn inzwischen `moveRestored` kam (Server hat den Zug doch).
+- `showMatchOver`: `won: null` = Match ohne Sieger (beide gegangen) → neutrales Overlay, keine Statistik;
+  `rematch` = letzter `rematchStatus` (kommt sofort, das Overlay erst nach der Animation – der Controller
+  merkt ihn sich und gibt ihn mit; ein neues `matchStart` setzt ihn zurück).
 
 Ereignisse Adapter → Controller (in Reihenfolge abgearbeitet; jede Animation läuft zu Ende,
 bevor das nächste Ereignis drankommt – „sofort“ = ohne Warteschlange):
@@ -134,15 +153,17 @@ bevor das nächste Ereignis drankommt – „sofort“ = ohne Warteschlange):
 | `opponentStatus` (sofort) | `{ state: 'choosing'\|'ready'\|'offline'\|'left' }` | „wählt …“ / „bereit ✓“ (nur wenn `features.status`) |
 | `roundOpen` | `{ round, commit: hex\|null }` | Zug-Buttons frei, Commit-Badge „🔒 a3f9…“ |
 | `roundLocked` | `{}` | beide haben gewählt → Countdown (3 Aufschläge à 500 ms) |
-| `roundResolved` | `{ number, myMove, oppMove, outcome: 1\|0\|-1, result: 'w'\|'d'\|'l', sentence, score: [ich, Gegner], proof: {hash, move, nonce}\|null, forfeit? }` | Aufdecken, Pips, Verlauf, `stats.recordRound`, `verifyCommit` → „fair ✓“ |
+| `opponentCommit` | `{ hash }` | online: Gegner hat gewählt → Badge „🔒 Ben hat gewählt: a3f9…“ |
+| `roundResolved` | `{ number, myMove, oppMove, outcome: 1\|0\|-1, result: 'w'\|'d'\|'l', sentence, score: [ich, Gegner], proof: {hash, move, nonce, shownHash?, ownHashOk?}\|null, forfeit? }` | Aufdecken, Pips, Verlauf, `stats.recordRound`; fair nur, wenn `verifyCommit` stimmt, `hash === shownHash` (vorher gezeigter Hash, falls bekannt) und `ownHashOk !== false` → „fair ✓“, sonst „⚠ Hash passt nicht“ |
 | `insight` | `{ text }` | „Was denkt der Computer?“ (nur `features.insight`) |
-| `matchOver` | `{ winner: 'me'\|'opp', score, reason }` | `stats.recordMatch({ mode: info.statsMode })`, Matchende-Overlay |
+| `matchOver` | `{ winner: 'me'\|'opp'\|null, score, reason, replay?, recordId? }` | wenn nicht `replay` und mit Sieger: `stats.recordMatch({ mode: info.statsMode })` + `adapter.markRecorded(recordId)`; Matchende-Overlay (`winner: null` neutral) |
 | `reaction` (sofort) | `{ emoji, fromMe }` | Emoji schwebt hoch |
 | `error` (sofort) | `{ message, fatal? }` | deutscher Fehlertext in der Arena |
 
 Zusätzlich (online, alle „sofort“ außer `moveRestored`): `moveRestored { move }`, `deadline { seconds, who }`,
-`claimAvailable { available }`, `rematchStatus { me, opp, oppLeft }`; `matchStart` kann `score`/`history`/`series`
-mitbringen, `matchOver` `replay`/`series`/`oppName`. Details: Abschnitt „Online-Adapter“.
+`claimAvailable { available }`, `rematchStatus { me, opp, oppLeft }`; `opponentCommit { hash }` (Warteschlange);
+`matchStart` kann `score`/`history`/`series` mitbringen, `matchOver` `replay`/`recordId`/`series`/`oppName`.
+Details: Abschnitt „Online-Adapter“.
 
 Online-Adapter (Phase 4): `roundResolved` darf schon während des Countdowns kommen (wartet in der
 Warteschlange); `proof` = Gegner-Zug/Nonce/Hash aus `history`, damit der Controller nachprüft.
@@ -249,26 +270,58 @@ jeden Zustand weiter.
 
 ```js
 createOnlineOpponent({ code, token, me, kind: 'duel'|'tournament', state, matchId?, apiFn, session, poke,
-                       now?, commitHash?, makeNonce? }) → Adapter & {
+                       now?, commitHash?, makeNonce?, timers? }) → Adapter & {
   update(state),            // neuer Server-Zustand (onState des Pollers)
   updateOnline(map),        // { p_id: bool } aus jeder Poll-Antwort (auch „unchanged“)
   claim() → Promise,        // Sieg beanspruchen (Server prüft 45 s)
-  leave() → Promise,        // API leave + Sitzung löschen
+  markRecorded(recordId),   // Match gezählt (session.markRecorded) → später `replay: true`
   matchId,                  // verfolgtes Match (Duell: state.current, Turnier: festes myMatch)
 }
 roundCount(match) = (match.dropped ?? 0) + match.history.length
-newReactions(list, lastId), maxReactionId(list), roundSentence(myMove, oppMove, oppName), CLAIM_AFTER_MS
+newReactions(list, lastId), maxReactionId(list), roundSentence(myMove, oppMove, oppName), CLAIM_AFTER_MS,
+matchRecordId(matchId) = 'm:<id>'
+```
+Verlassen macht der Raum-Screen selbst (`api('leave')`); die Sitzung wird nur bei Erfolg oder 403/404
+gelöscht (`room-flow.js`: `leaveClearsSession`).
+
+```js
+// room-flow.js (DOM-frei, für ui/room.js und ui/invite.js)
+decideRoute(state, { me, shown, dismissedMatch? }) → { view: 'lobby'|'arena'|'bracket', matchId?, mode, fresh, toast? }
+inviteErrorKind(err) → 'missing' (nur 404) | 'retry'
+leaveClearsSession(err|null) → bool
+myRunningMatch(state, me) → { id, mode: 'duel'|'tournament', recordId } | null
+     // Verlassen zählt ein laufendes Match als Niederlage (einmal); „Menü“ in der Arena fragt dann nach
+closedInviteText(info) → „schon beendet“ (Duell finished) | „schon voll … anderer Tab …“ | „kein Platz mehr“
+// throttle.js
+singleFlight(fn, { onChange? }) → run (gibt null zurück, solange eine Anfrage läuft; run.busy)
+createCooldown(ms, { timers?, onChange? }) → { take() → bool, active }
+```
+`ui/reaction-bar.js`: `reactionBar({ onReact, hidden? })` – gemeinsame Reaktionsleiste (Arena + Turnierbaum),
+`REACTION_COOLDOWN_MS` (1 s); die Emoji-Liste ist `REACTIONS` aus `rules.js` (Spiegel von `RPS_EMOJIS` in
+`validate.php`, per JS-Test geprüft).
 ```
 
 Ablauf einer Runde:
 1. `roundOpen` sobald eine neue Runde (`roundCount`) beginnt. `submitMove(move)`: Nonce (16 Byte hex) →
    `commitHash` → Pending `{ matchId, round, move, nonce, hash }` in `sessionStorage`
    (`rps.pending.<code>`) → `commit` → `poke()`.
-2. `cur.lockedAt` gesetzt → `roundLocked` (Countdown) und automatisch `reveal` mit dem Pending-Zug.
-3. Neue `history`-Einträge → `roundResolved` (Gegnerzug/Nonce/Hash als `proof`, der Controller prüft
-   `verifyCommit` → „fair ✓“). Der Gegnerzug stammt **nur** aus `history`.
-4. `winner`/`end` gesetzt → `matchOver` (`replay: true`, wenn das Match beim Öffnen schon vorbei war →
-   keine Statistik). Duell: `rematchStatus` aus `state.rematch`, Serie aus `state.series`.
+   Fehler: endgültige 4xx verwerfen das Pending. Bei Status 0/5xx (`retryable`) bleibt es (der Server hat
+   den Commit evtl. gespeichert), `poke()`; zeigt der Server `cur.committed[me]`, gilt der Zug als
+   abgegeben (`moveRestored`, bzw. kein Fehler, falls das schon während des Requests sichtbar war).
+   409 nach so einem Fehler: das frühere Pending bleibt, wenn es zu `cur.commit[me]` passt.
+2. `cur.commit[gegner]` erscheint → `opponentCommit { hash }` (einmal je Runde, Hash wird gemerkt).
+   `cur.lockedAt` gesetzt → `roundLocked` (Countdown) und automatisch `reveal` mit dem Pending-Zug;
+   schlägt `reveal` mit Netz-/Serverfehler fehl, wiederholt der Adapter selbst mit Backoff (1, 2, 4 … s),
+   solange die Runde offen ist und er nicht entsorgt wurde.
+3. Neue `history`-Einträge → `roundResolved` (Gegnerzug/Nonce/Hash als `proof`, dazu `shownHash` = vorher
+   gezeigter Gegner-Hash und `ownHashOk` = eigener Hash `h[me]` passt zum Pending). Der Gegnerzug stammt
+   **nur** aus `history`. Forfeit-Runden ohne Lock (Commit-Frist) lösen keinen `roundLocked` aus.
+4. `winner`/`end` gesetzt → `matchOver` mit `recordId` (`m:<matchId>`); `replay: true`, wenn
+   `session.wasRecorded(code, recordId)` → keine Statistik. Der Controller zählt und ruft dann
+   `markRecorded(recordId)` – so zählt ein Reload mitten in der Animation weder doppelt noch gar nicht.
+   Duell: `rematchStatus` aus `state.rematch` (`oppLeft` auch, wenn nach beanspruchtem Sieg der Gegner
+   offline ist), Serie aus `state.series`. `matchStart.oppDetail` bleibt leer – die Turnierrunde
+   („Halbfinale“) steht im Kopf der Arena, „Runde n“ in der Mitte ist die Spielrunde.
 
 Weitere Ereignisse: `opponentStatus` (`choosing`/`ready`/`offline`/`left`), `deadline`
 (`{ seconds, who: 'reveal'|'commit'|'oppCommit' }` aus `cur.deadline` bzw. `cur.commitDeadline`),
@@ -280,20 +333,26 @@ Reload: `rps.token.<code>` + `rps.me.<code>` behalten den Platz; `matchStart` li
 `lockedAt` aus dem Pending aufgedeckt.
 
 Weitere DOM-freie Module dazu:
-- `net.js`: `api`, `ApiError` (`status`, `retryable`), `createPoller({ code, token, onState, onOnline,
-  onError(err, { failures, fatal }), onConnection(ok), apiFn?, timers?, isHidden? })` mit
+- `net.js`: `api(action, params, { fetchImpl?, timeoutMs? = API_TIMEOUT_MS (8 s) })` – hängende Requests
+  werden per AbortController abgebrochen → `ApiError(…, 0)` (wiederholbar); `ApiError` (`status`,
+  `retryable`), `HTTP` (zentrale Statuscodes), `StateHandlerError`; `createPoller({ code, token, onState,
+  onOnline, onError(err, { failures, fatal }), onConnection(ok), apiFn?, timers?, isHidden?, events? })` mit
   `start/stop/poke/setMode('match'|'idle'|'end')`, `POLL_MS` (1 s / 1 s / 5 s, versteckt ≥ 3 s),
-  Backoff 1→2→4→8→10 s, `RECONNECT_TEXT`; 403/404 sind fatal.
+  Backoff 1→2→4→8→10 s, `RECONNECT_TEXT`; 403/404 sind fatal. Wirft `onState`, meldet der Poller
+  `StateHandlerError` an `onError` (kein Verbindungsfehler) und übernimmt die Version nicht – der Zustand
+  wird beim nächsten Poll erneut verarbeitet. Meldet `events` (window) „online“, wird sofort neu geladen
+  (kein Warten auf den Backoff; der Verbindungshinweis verschwindet beim ersten Erfolg).
   `createRoomSession(storage)` → `get/set/clear(code)`, `get/set/clearPending(code)`,
-  `wasRecorded/markRecorded(code, id)` (sessionStorage-Schlüssel `rps.token.`, `rps.me.`,
+  `wasRecorded/markRecorded(code, id)` (IDs `m:<match>`, `t:<matches>`, `confetti:t:<matches>`; sessionStorage-Schlüssel `rps.token.`, `rps.me.`,
   `rps.pending.`, `rps.recorded.` + Code).
 - `bracket.js`: `buildBracket(state, me)` → `{ rounds: [{ index, title, matches: [{ id, label, status,
   mine, slots: [{ id, name, score, won, me, left, placeholder }] }] }], champion }`,
   `roundTitle(i, total)` (Finale/Halbfinale/Viertelfinale/Achtelfinale/Runde n),
   `matchStatus(m)` (`pending`/`live`/`done`/`bye`), `tournamentRole(state, me)`
-  (`spectator`/`playing`/`waiting`/`out`/`champion`).
+  (`spectator`/`playing`/`waiting`/`out`/`champion`), `tournamentKey(state)`, `myLiveMatchId(built)`,
+  `shouldScrollToMatch(prev, next)` (Baum scrollt nur beim ersten Rendern/Matchwechsel).
 
 Screens: `#/duel` und `#/tournament` = Raum erstellen (`ui/create-room.js`), `#<code>` = `ui/room.js`
 (Einladung `ui/invite.js` → Lobby `ui/lobby.js` mit `ui/share.js` → Arena bzw. Turnierbaum
-`ui/bracket-view.js`). Turnier-Statistik: `recordMatch({ mode: 'tournament' })` je Match und
-einmal `recordTournament({ won })` pro beendetem Turnier.
+`ui/bracket-view.js`). Turnier-Statistik: `recordMatch({ mode: 'tournament' })` je Match (Statistik-Seite:
+Zeile „Turnier-Matches“) und einmal `recordTournament({ won })` pro beendetem Turnier.

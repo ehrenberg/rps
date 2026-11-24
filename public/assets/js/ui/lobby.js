@@ -5,6 +5,7 @@ import { screenLayout } from './components.js';
 import { shareCard } from './share.js';
 import { handIcon } from '../hands.js';
 import { VARIANT_NAMES } from '../rules.js';
+import { singleFlight } from '../throttle.js';
 
 export const MIN_TOURNAMENT_PLAYERS = 3;
 export const MAX_TOURNAMENT_PLAYERS = 16;
@@ -19,7 +20,7 @@ function waitingAnimation(text) {
 }
 
 /**
- * @param {{ state, me, code, onStart:()=>void, onLeave:()=>void, announce?:(text:string)=>void }} o
+ * @param {{ state, me, code, onStart:()=>Promise|void, onLeave:()=>void, announce?:(text:string)=>void }} o
  * @returns {{ el, focus, update(state), dispose }}
  */
 export function lobbyView({ state: initial, me, code, onStart, onLeave, announce = null }) {
@@ -39,9 +40,13 @@ export function lobbyView({ state: initial, me, code, onStart, onLeave, announce
   const listPanel = h('section', { class: 'panel glass' }, h('h2', { class: 'panel__title' }, 'Spieler'), list);
   const leave = h('button', { type: 'button', class: 'btn btn--ghost', onclick: onLeave }, icon('door', { size: 18 }), 'Raum verlassen');
   body.append(...[status, share, isDuel ? null : listPanel, h('div', { class: 'lobby__footer' }, leave)].filter(Boolean));
+  let lastState = initial;
+  // „Turnier starten“ nur einmal anfragen, bis die Antwort da ist
+  const start = singleFlight(() => onStart(), { onChange: () => update(lastState) });
 
   let known = null; // Spieler-IDs für Beitritts-Ansagen
   function update(state) {
+    lastState = state;
     const players = activePlayers(state);
     // Start-Button wird neu gebaut: Fokus übernehmen statt an <body> zu verlieren.
     const hadFocus = status.contains(document.activeElement);
@@ -64,13 +69,13 @@ export function lobbyView({ state: initial, me, code, onStart, onLeave, announce
     if (isHost) {
       const enough = players.length >= MIN_TOURNAMENT_PLAYERS;
       replaceChildren(status, count,
-        h('button', { type: 'button', class: 'btn btn--primary btn--lg btn--start', disabled: !enough, onclick: onStart }, 'Turnier starten', icon('trophy')),
+        h('button', { type: 'button', class: 'btn btn--primary btn--lg btn--start', disabled: !enough || start.busy, onclick: () => start() }, 'Turnier starten', icon('trophy')),
         h('p', { class: 'muted' }, enough ? 'Alle da? Dann los!' : `Ab ${MIN_TOURNAMENT_PLAYERS} Spielern – teil den Link.`));
     } else {
       const host = (state.players ?? []).find((p) => p.id === state.host)?.name ?? 'Host';
       replaceChildren(status, count, waitingAnimation(`Warte auf ${host}`));
     }
-    if (hadFocus) (status.querySelector('button') ?? heading).focus({ preventScroll: true });
+    if (hadFocus) (status.querySelector('button:not([disabled])') ?? heading).focus({ preventScroll: true });
   }
   update(initial);
   return { el, focus: () => heading.focus({ preventScroll: true }), update, dispose() {} };
