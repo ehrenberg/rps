@@ -44,7 +44,7 @@ Jede Phase endet mit etwas Spielbarem. Abnahme jeweils im Browser (Desktop + Han
 - **Abnahme:** Turnier mit 5 Browserfenstern läuft bis zum Sieger durch.
 
 ## Phase 6 – Feinschliff & Livegang
-- [ ] Barrierefreiheit (Tastatur, Fokus, ARIA-Live für Ergebnisse, Kontrast)
+- [x] Barrierefreiheit (Tastatur, Fokus, ARIA-Live für Ergebnisse, Kontrast) – axe-Test `tests/e2e/a11y.test.mjs` (AXE_PATH)
 - [ ] Favicon, Manifest (optional PWA ohne Service-Worker-Tracking)
 - [ ] Deployment nach [DEPLOYMENT.md](DEPLOYMENT.md), Checkliste abhaken
 

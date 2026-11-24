@@ -66,3 +66,17 @@ Anfang an vollständig zeichnen.
 - Raumcodes bleiben 6 Zeichen.
 **Begründung:** Kurze Links sind ein Kernfeature. Enumeration ist durch die kurze Lebensdauer von
 Lobbys entschärft, und das Token schützt die Plätze – ein erratener Code erlaubt nur Beitritt/Zuschauen.
+
+### 2026-11-24 – Barrierefreiheit: Regeln für UI-Code
+**Entscheidung:**
+- Fokus wird als `outline` (3 px Gold, Versatz 3 px) gezeigt, nicht als `box-shadow` – eigene Schatten
+  (Primär-Button, gewählte Option, Karten) haben den Ring sonst unsichtbar überschrieben.
+- Screenreader-Ansagen über **eine** Live-Region (`announce`): Rundenergebnis, Matchende, Start einer Frist,
+  Gegner hat gewählt/offline/verlassen, Beitritte in der Lobby, Turnier-Rolle und -Sieger. Kein Countdown,
+  kein Sekunden-Ticker, keine `role=status`-Container, die beim Polling neu gebaut werden.
+- In-Page-Anker (Skip-Link `#app`) sind keine Route: `main.js` fängt den Skip-Link ab und behält bei
+  `#id` eines vorhandenen Elements den laufenden Screen.
+- Touch-Ziele mindestens 44 × 44 px (`--tap-min`); `aria-label` nur auf Elementen mit passender Rolle,
+  sonst sichtbaren Text plus `.visually-hidden`.
+- axe-core wird **nicht** ins Repo aufgenommen; `tests/e2e/a11y.test.mjs` injiziert es per `AXE_PATH`.
+**Begründung:** WCAG 2.1 AA ohne neue Abhängigkeiten in `public/`; Ansagen informativ, aber nicht geschwätzig.
